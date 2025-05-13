@@ -18,8 +18,8 @@ function Dashboard() {
         setError(null);
         try {
             const [servicesResponse, incidentsResponse] = await Promise.all([
-                api.get('/services').catch(e => { console.error("Service fetch error:", e); return null; }), // Catch individual promise errors
-                api.get('/incidents').catch(e => { console.error("Incident fetch error:", e); return null; })  // Catch individual promise errors
+                api.get('/services').catch(e => { console.error("Service fetch error:", e); return null; }), 
+                api.get('/incidents').catch(e => { console.error("Incident fetch error:", e); return null; })
             ]);
 
             const fetchedServices = (servicesResponse && Array.isArray(servicesResponse.data)) ? servicesResponse.data : [];
@@ -30,7 +30,7 @@ function Dashboard() {
                 incidents: fetchedIncidents
             });
 
-        } catch (err) { // This catch is for errors not caught by individual promise catches or other sync errors
+        } catch (err) { 
             console.error("🔴 [Dashboard] Error in fetchData's Promise.all or subsequent logic:", err);
             setError('Failed to fetch dashboard data. Please try again.');
             setSummary({ services: [], incidents: [] }); 
@@ -47,12 +47,12 @@ function Dashboard() {
         if (isConnected && socket) {
             const handleUpdate = (dataType, data) => {
                 console.log(`[Socket Dashboard] ${dataType} update:`, data);
-                fetchData(); // Refetch all data for simplicity
+                fetchData(); 
             };
 
             socket.on('incidentCreated', (data) => handleUpdate('IncidentCreated', data));
             socket.on('incidentUpdated', (data) => handleUpdate('IncidentUpdated', data));
-            socket.on('incidentDeleted', () => fetchData()); // Just refetch
+            socket.on('incidentDeleted', () => fetchData()); 
             socket.on('serviceStatusChanged', (data) => handleUpdate('ServiceStatusChanged', data));
             socket.on('serviceCreated', (data) => handleUpdate('ServiceCreated', data));
             socket.on('serviceDeleted', () => fetchData());
@@ -80,7 +80,7 @@ function Dashboard() {
         return <Alert severity="error" sx={{ m: 3 }}>{error}</Alert>;
     }
 
-    // These arrays are now guaranteed to be arrays due to initialization and fetchData logic
+    
     const { services: servicesArray, incidents: incidentsArray } = summary;
 
     const operationalServices = servicesArray.filter(s => s.status === 'operational').length;

@@ -1,53 +1,50 @@
 // status-page-app/server/middleware/auth.js
 const jwt = require('jsonwebtoken');
-const User = require('../models/User'); // Assuming User model has findById
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
+const HARDCODED_TEST_SECRET = "MySimpleTestSecretAlphaNumeric123"; // Test Secret - MUST MATCH authController.js
+
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const clientToken = authHeader && authHeader.split(' ')[1];
 
-    if (token == null) {
-        logger.warn('Authentication attempt failed: No token provided.');
+    if (clientToken == null) {
+        logger.warn('[authenticateToken] No token provided by client.');
         return next(ApiError.unauthorized('Authentication token required.'));
     }
+    
+    logger.info(`[authenticateToken] DEBUG_MODE: Verifying token with HARDCODED_TEST_SECRET: "${HARDCODED_TEST_SECRET}"`);
+    logger.info(`[authenticateToken] DEBUG_MODE: Token received from client for verification: "${clientToken}"`);
 
-    const currentJwtSecretForVerify = process.env.JWT_SECRET;
-    if (!currentJwtSecretForVerify || currentJwtSecretForVerify === 'your-super-secret-jwt-key-change-this-in-production') {
-        logger.error('[authenticateToken] CRITICAL: JWT_SECRET is missing or is placeholder during token verification. This will cause all token verifications to fail.');
-        return next(ApiError.internalServerError('Server authentication configuration error.'));
-    }
-    // logger.info(`[authenticateToken] Verifying token with JWT_SECRET: ${currentJwtSecretForVerify ? 'SET (value hidden)' : 'NOT SET'}`); // For extreme debug, but be careful logging secrets
 
     try {
-        const decoded = jwt.verify(token, currentJwtSecretForVerify);
+        const decodedClient = jwt.verify(clientToken, HARDCODED_TEST_SECRET); // Using hardcoded secret
         
-        // Fetch user details to ensure user still exists and has necessary info
-        const user = await User.findById(decoded.userId); 
+        const user = await User.findById(decodedClient.userId); 
         if (!user) {
-            logger.warn(`Authenticated user ID ${decoded.userId} not found in database.`);
+            logger.warn(`[authenticateToken] Authenticated user ID ${decodedClient.userId} not found in database.`);
             return next(ApiError.unauthorized('User associated with token not found.'));
         }
 
         req.user = { 
-            userId: user.id, // Use user.id from the database record
-            organizationId: user.organization_id, // from DB
-            role: user.role, // from DB
-            email: user.email // from DB, if needed by other parts like password update
+            userId: user.id,
+            organizationId: user.organization_id,
+            role: user.role,
+            email: user.email
         };
-        // logger.info(`[authenticateToken] Token verified successfully for user ID: ${req.user.userId}`);
+        logger.info(`[authenticateToken] Client token verified successfully for user ID: ${req.user.userId} using hardcoded secret.`);
         next();
     } catch (err) {
-        logger.warn(`[authenticateToken] Token verification failed. Error: ${err.name}, Message: ${err.message}`);
+        logger.warn(`[authenticateToken] Client token verification FAILED (with hardcoded secret). Error: ${err.name}, Message: ${err.message}`);
         if (err.name === 'TokenExpiredError') {
             return next(ApiError.unauthorized('Token expired.'));
         }
         if (err.name === 'JsonWebTokenError') { // Catches invalid signature, malformed token, etc.
-            return next(ApiError.forbidden('Invalid token.'));
+            return next(ApiError.forbidden('Invalid token (e.g., signature mismatch).'));
         }
-        // For other unexpected errors during verification
-        logger.error('Unexpected error during token verification:', { message: err.message, stack: err.stack });
+        logger.error('[authenticateToken] Unexpected error during client token verification:', { message: err.message, stack: err.stack });
         return next(ApiError.internalServerError('Authentication failed due to an unexpected error.'));
     }
 };
@@ -75,9 +72,6 @@ const checkOrganizationMembership = async (req, res, next) => {
         logger.warn('Organization membership check failed: User not associated with an organization or organizationId missing from req.user.', { userId: req.user?.id });
         return next(ApiError.forbidden('User is not associated with an organization or organization ID is missing.'));
     }
-    // This check is relevant if an :organizationId is part of the URL param
-    // and you want to ensure the user belongs to *that specific* org.
-    // If routes are just for "the user's own org", then req.user.organizationId is sufficient.
     if (req.params.organizationId && req.params.organizationId !== req.user.organizationId) {
         logger.warn(`Organization membership check failed: User ${req.user.userId} attempted to access resources for org ${req.params.organizationId} but belongs to ${req.user.organizationId}.`);
         return next(ApiError.forbidden('Access denied to this organization\'s resources.'));

@@ -4,21 +4,11 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
-// Log the JWT_SECRET and JWT_EXPIRES_IN at server startup
-const currentJwtSecret = process.env.JWT_SECRET;
-const currentJwtExpiresIn = process.env.JWT_EXPIRES_IN;
+const DEBUG_FORCED_EXPIRES_IN = '8h'; 
+const HARDCODED_TEST_SECRET = "MySimpleTestSecretAlphaNumeric123"; // Test Secret
 
-logger.info(`[authController] Initial JWT_SECRET from .env: ${currentJwtSecret ? 'SET (value hidden for security)' : 'NOT SET or undefined'}`);
-if (!currentJwtSecret || currentJwtSecret === 'your-super-secret-jwt-key-change-this-in-production') {
-    logger.error('[authController] CRITICAL SECURITY WARNING: JWT_SECRET is not set or is using the default placeholder. Please set a strong, unique secret in your .env file!');
-}
-logger.info(`[authController] Initial JWT_EXPIRES_IN from .env: ${currentJwtExpiresIn}`);
-const effectiveJwtExpiresIn = currentJwtExpiresIn || '1h';
-logger.info(`[authController] Effective JWT_EXPIRES_IN for new tokens (before debug override): ${effectiveJwtExpiresIn}`);
-
-const DEBUG_FORCED_EXPIRES_IN = '8h';
-logger.info(`[authController] DEBUG: Forcing token expiration to: ${DEBUG_FORCED_EXPIRES_IN}`);
-
+logger.info(`[authController] DEBUG_MODE: Using HARDCODED_TEST_SECRET for signing: "${HARDCODED_TEST_SECRET}"`);
+logger.info(`[authController] DEBUG_MODE: Forcing token expiration to: ${DEBUG_FORCED_EXPIRES_IN}`);
 
 exports.register = async (req, res, next) => {
     const { username, email, password, organizationName } = req.body;
@@ -47,17 +37,12 @@ exports.register = async (req, res, next) => {
             return next(ApiError.internalServerError('User registration succeeded but failed to fetch user details.'));
         }
 
-        if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-this-in-production') {
-            logger.error("[authController] CANNOT SIGN TOKEN: JWT_SECRET is missing or is placeholder.");
-            return next(ApiError.internalServerError('Server configuration error preventing token signing.'));
-        }
-
         const token = jwt.sign(
             { userId: userDetails.id, organizationId: userDetails.organization_id, role: userDetails.role },
-            process.env.JWT_SECRET,
+            HARDCODED_TEST_SECRET, // Using hardcoded secret
             { expiresIn: DEBUG_FORCED_EXPIRES_IN }
         );
-        logger.info(`[authController] Token generated for user ${userDetails.email} upon registration.`);
+        logger.info(`[authController.register] Token generated for user ${userDetails.email}.`);
 
         res.status(201).json({
             message: 'User registered successfully',
@@ -89,33 +74,28 @@ exports.login = async (req, res, next) => {
     }
 
     try {
-        const user = await User.findByEmail(email);
+        const user = await User.findByEmail(email); 
         if (!user) {
             return next(ApiError.unauthorized('Invalid credentials.'));
         }
 
-        const isMatch = await User.comparePassword(password, user.password_hash);
+        const isMatch = await User.comparePassword(password, user.password_hash); 
         if (!isMatch) {
             return next(ApiError.unauthorized('Invalid credentials.'));
         }
         
-        const userDetails = await User.findById(user.id);
-        if (!userDetails || !userDetails.organization_id) {
-             logger.error(`User ${user.id} logged in but has no organization_id or org details missing post-fetch.`);
-             return next(ApiError.internalServerError('User account configuration error during login.'));
+        const userDetails = await User.findById(user.id); 
+        if (!userDetails || !userDetails.organization_id) { 
+             logger.error(`User ${user.id} logged in, but full details (like organization_id) are missing after fetching by ID.`);
+             return next(ApiError.internalServerError('User account configuration error during login (missing details).'));
         }
 
-        if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-this-in-production') {
-            logger.error("[authController] CANNOT SIGN TOKEN: JWT_SECRET is missing or is placeholder.");
-            return next(ApiError.internalServerError('Server configuration error preventing token signing.'));
-        }
-
-        const token = jwt.sign(
+        const token = jwt.sign( 
             { userId: userDetails.id, organizationId: userDetails.organization_id, role: userDetails.role },
-            process.env.JWT_SECRET,
+            HARDCODED_TEST_SECRET, // Using hardcoded secret
             { expiresIn: DEBUG_FORCED_EXPIRES_IN }
         );
-        logger.info(`[authController] Token generated for user ${userDetails.email} upon login.`);
+        logger.info(`[authController.login] Token generated for user ${userDetails.email}.`);
         
         res.status(200).json({
             message: 'Login successful',
@@ -140,7 +120,6 @@ exports.getProfile = async (req, res, next) => {
     try {
         const userId = req.user.userId; 
         const user = await User.findById(userId);
-
         if (!user) {
             return next(ApiError.notFound('User not found.'));
         }
@@ -163,23 +142,19 @@ exports.getProfile = async (req, res, next) => {
 exports.updateProfile = async (req, res, next) => {
     const userId = req.user.userId;
     const { username, email } = req.body;
-
     if (!username && !email) {
         return next(ApiError.badRequest('No fields to update. Provide username or email.'));
     }
-
     try {
         const updatedUser = await User.updateProfile(userId, { username, email });
         if (!updatedUser) {
             return next(ApiError.notFound('User not found or update failed.'));
         }
-        
         const userDetails = await User.findById(updatedUser.id);
         if (!userDetails) {
              logger.error(`Failed to fetch details for updated user ID: ${updatedUser.id}`);
             return next(ApiError.internalServerError('Profile update succeeded but failed to fetch updated user details.'));
         }
-
         res.status(200).json({
             message: 'Profile updated successfully.',
             user: {
@@ -204,14 +179,12 @@ exports.updateProfile = async (req, res, next) => {
 exports.updatePassword = async (req, res, next) => {
     const userId = req.user.userId;
     const { currentPassword, newPassword } = req.body;
-
     if (!currentPassword || !newPassword) {
         return next(ApiError.badRequest('Current password and new password are required.'));
     }
     if (newPassword.length < 6) { 
         return next(ApiError.badRequest('New password must be at least 6 characters long.'));
     }
-
     try {
         const userForHash = await User.findByEmail(req.user.email); 
         if (!userForHash || !userForHash.password_hash) {
@@ -230,7 +203,6 @@ exports.updatePassword = async (req, res, next) => {
                 return next(ApiError.unauthorized('Incorrect current password.'));
             }
         }
-
         await User.updatePassword(userId, newPassword);
         res.status(200).json({ message: 'Password updated successfully.' });
     } catch (error) {
