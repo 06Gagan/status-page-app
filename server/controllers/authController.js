@@ -1,9 +1,24 @@
+// status-page-app/server/controllers/authController.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const Team = require('../models/Team');
-const Service = require('../models/Service');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
+
+// Log the JWT_SECRET and JWT_EXPIRES_IN at server startup
+const currentJwtSecret = process.env.JWT_SECRET;
+const currentJwtExpiresIn = process.env.JWT_EXPIRES_IN;
+
+logger.info(`[authController] Initial JWT_SECRET from .env: ${currentJwtSecret ? 'SET (value hidden for security)' : 'NOT SET or undefined'}`);
+if (!currentJwtSecret || currentJwtSecret === 'your-super-secret-jwt-key-change-this-in-production') {
+    logger.error('[authController] CRITICAL SECURITY WARNING: JWT_SECRET is not set or is using the default placeholder. Please set a strong, unique secret in your .env file!');
+}
+logger.info(`[authController] Initial JWT_EXPIRES_IN from .env: ${currentJwtExpiresIn}`);
+const effectiveJwtExpiresIn = currentJwtExpiresIn || '1h';
+logger.info(`[authController] Effective JWT_EXPIRES_IN for new tokens (before debug override): ${effectiveJwtExpiresIn}`);
+
+const DEBUG_FORCED_EXPIRES_IN = '8h';
+logger.info(`[authController] DEBUG: Forcing token expiration to: ${DEBUG_FORCED_EXPIRES_IN}`);
+
 
 exports.register = async (req, res, next) => {
     const { username, email, password, organizationName } = req.body;
@@ -32,12 +47,17 @@ exports.register = async (req, res, next) => {
             return next(ApiError.internalServerError('User registration succeeded but failed to fetch user details.'));
         }
 
+        if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-this-in-production') {
+            logger.error("[authController] CANNOT SIGN TOKEN: JWT_SECRET is missing or is placeholder.");
+            return next(ApiError.internalServerError('Server configuration error preventing token signing.'));
+        }
 
         const token = jwt.sign(
             { userId: userDetails.id, organizationId: userDetails.organization_id, role: userDetails.role },
             process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+            { expiresIn: DEBUG_FORCED_EXPIRES_IN }
         );
+        logger.info(`[authController] Token generated for user ${userDetails.email} upon registration.`);
 
         res.status(201).json({
             message: 'User registered successfully',
@@ -85,11 +105,17 @@ exports.login = async (req, res, next) => {
              return next(ApiError.internalServerError('User account configuration error during login.'));
         }
 
+        if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your-super-secret-jwt-key-change-this-in-production') {
+            logger.error("[authController] CANNOT SIGN TOKEN: JWT_SECRET is missing or is placeholder.");
+            return next(ApiError.internalServerError('Server configuration error preventing token signing.'));
+        }
+
         const token = jwt.sign(
             { userId: userDetails.id, organizationId: userDetails.organization_id, role: userDetails.role },
             process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+            { expiresIn: DEBUG_FORCED_EXPIRES_IN }
         );
+        logger.info(`[authController] Token generated for user ${userDetails.email} upon login.`);
         
         res.status(200).json({
             message: 'Login successful',
@@ -110,7 +136,6 @@ exports.login = async (req, res, next) => {
     }
 };
 
-
 exports.getProfile = async (req, res, next) => {
     try {
         const userId = req.user.userId; 
@@ -119,17 +144,6 @@ exports.getProfile = async (req, res, next) => {
         if (!user) {
             return next(ApiError.notFound('User not found.'));
         }
-
-        const teams = await Team.findTeamsByUserId(userId);
-        // Ensure user.organization_id is valid before fetching services
-        let services = [];
-        if (user.organization_id) {
-            services = await Service.findAllByOrganizationId(user.organization_id);
-        } else {
-            logger.warn(`User ${userId} has no organization_id in getProfile, services will be empty.`);
-        }
-
-
         res.status(200).json({
             id: user.id,
             username: user.username,
@@ -139,15 +153,12 @@ exports.getProfile = async (req, res, next) => {
             organization_slug: user.organization_slug,
             role: user.role,
             created_at: user.created_at,
-            teams: teams,
-            services: services
         });
     } catch (error) {
         logger.error(`Get profile error: ${error.message}`, { code: error.code, stack: error.stack });
         next(ApiError.internalServerError('Error fetching profile.'));
     }
 };
-
 
 exports.updateProfile = async (req, res, next) => {
     const userId = req.user.userId;
@@ -168,7 +179,6 @@ exports.updateProfile = async (req, res, next) => {
              logger.error(`Failed to fetch details for updated user ID: ${updatedUser.id}`);
             return next(ApiError.internalServerError('Profile update succeeded but failed to fetch updated user details.'));
         }
-
 
         res.status(200).json({
             message: 'Profile updated successfully.',
@@ -203,13 +213,9 @@ exports.updatePassword = async (req, res, next) => {
     }
 
     try {
-        const userForHash = await User.findByEmail(req.user.email); // Assuming req.user has email after auth
+        const userForHash = await User.findByEmail(req.user.email); 
         if (!userForHash || !userForHash.password_hash) {
-            // Fallback or error if email not on req.user or user not found by email.
-            // This part needs req.user to have email from authenticateToken if not fetching full user object there.
-            // For now, let's rely on User.findById in auth providing enough context,
-            // or fetch the user with password hash explicitly.
-            const userWithSensitiveData = await User.findByEmail(req.user.email); // Re-fetch user by a unique field to get hash
+            const userWithSensitiveData = await User.findByEmail(req.user.email); 
              if(!userWithSensitiveData || !userWithSensitiveData.password_hash) {
                 logger.error(`Could not retrieve password hash for user ${userId} during password update.`);
                 return next(ApiError.internalServerError('Could not verify current password.'));
@@ -225,7 +231,6 @@ exports.updatePassword = async (req, res, next) => {
             }
         }
 
-
         await User.updatePassword(userId, newPassword);
         res.status(200).json({ message: 'Password updated successfully.' });
     } catch (error) {
@@ -233,4 +238,3 @@ exports.updatePassword = async (req, res, next) => {
         next(ApiError.internalServerError('Error updating password.'));
     }
 };
-
