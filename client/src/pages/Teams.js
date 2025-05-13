@@ -1,10 +1,11 @@
+// status-page-app/client/src/pages/Teams.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../config/api';
 import {
     Container, Typography, Box, List, ListItem, ListItemText,
     CircularProgress, Alert, Button, TextField, Dialog, DialogActions,
-    DialogContent, DialogTitle, IconButton, // Removed DialogContentText
+    DialogContent, DialogTitle, IconButton,
     Select, MenuItem, FormControl, InputLabel, Paper, Grid,
     ListItemSecondaryAction
 } from '@mui/material';
@@ -42,9 +43,7 @@ function Teams() {
         setLoading(true);
         setError('');
         try {
-            const response = await api.get('/teams', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get('/teams');
             setTeams(response.data || []);
         } catch (err) {
             console.error("Error fetching teams:", err);
@@ -59,14 +58,18 @@ function Teams() {
     const fetchOrganizationUsers = useCallback(async () => {
         if (!token || !isAdmin) return;
         setUsersLoading(true);
+        setAddMemberError(''); // Clear previous errors
         try {
-            const response = await api.get('/users', {
-                 headers: { Authorization: `Bearer ${token}` }
-            });
+            // This now correctly calls GET /api/v1/users
+            const response = await api.get('/users'); 
             setOrganizationUsers(response.data || []);
+            if (!response.data || response.data.length === 0) {
+                setAddMemberError('No other users found in your organization to add.');
+            }
         } catch (err) {
-            console.warn("Error fetching organization users (endpoint might be missing):", err);
-            setOrganizationUsers([]);
+            console.warn("Error fetching organization users:", err);
+            setOrganizationUsers([]); 
+            setAddMemberError('Could not load users. Ensure the API endpoint is correct and the server is running.');
         } finally {
             setUsersLoading(false);
         }
@@ -77,7 +80,7 @@ function Teams() {
         if (!authLoading && isAuthenticated) {
             fetchTeams();
             if (isAdmin) {
-                fetchOrganizationUsers();
+                fetchOrganizationUsers(); // Call this when the component mounts if user is admin
             }
         } else if (!authLoading && !isAuthenticated) {
             setError("Not authenticated. Please log in.");
@@ -106,10 +109,7 @@ function Teams() {
         setCreateError('');
         setIsCreating(true);
         try {
-             const response = await api.post('/teams',
-                { name: newTeamName.trim() },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
+             const response = await api.post('/teams', { name: newTeamName.trim() });
             setTeams(prevTeams => [...prevTeams, response.data]);
             setNewTeamName('');
             handleCloseCreateDialog();
@@ -129,11 +129,13 @@ function Teams() {
         setTeamMembers([]);
         setSelectedUserToAdd('');
         setAddMemberError('');
+        // Fetch organization users again here if it might have changed or if not fetched initially
+        if (isAdmin && organizationUsers.length === 0 && !usersLoading) {
+            fetchOrganizationUsers();
+        }
         setOpenMembersDialog(true);
         try {
-            const response = await api.get(`/teams/${team.id}/members`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get(`/teams/${team.id}/members`);
             setTeamMembers(response.data || []);
         } catch (err) {
             console.error("Error fetching team members:", err);
@@ -153,15 +155,13 @@ function Teams() {
         setIsAddingMember(true);
         setAddMemberError('');
         try {
-            await api.post(`/teams/${selectedTeam.id}/members`,
-                { userId: selectedUserToAdd, role: 'member' },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-            const response = await api.get(`/teams/${selectedTeam.id}/members`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            // Your backend teamController for addMemberToTeam expects { userId, role }
+            // Role can be defaulted to 'member' or you can add a UI element for it
+            await api.post(`/teams/${selectedTeam.id}/members`, { userId: selectedUserToAdd, role: 'member' });
+            // Refresh members list for the current team
+            const response = await api.get(`/teams/${selectedTeam.id}/members`);
             setTeamMembers(response.data || []);
-            setSelectedUserToAdd('');
+            setSelectedUserToAdd(''); // Reset selection
         } catch (err) {
             console.error("Error adding member:", err);
             setAddMemberError(err.response?.data?.message || err.message || 'Failed to add member.');
@@ -172,13 +172,14 @@ function Teams() {
 
     const handleRemoveMember = async (memberUserId) => {
         if (!selectedTeam || !memberUserId || !isAdmin) return;
+        // Optional: Add a confirmation dialog before removing
         try {
-            await api.delete(`/teams/${selectedTeam.id}/members/${memberUserId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            setTeamMembers(prevMembers => prevMembers.filter(member => member.user_id !== memberUserId && member.id !== memberUserId));
+            await api.delete(`/teams/${selectedTeam.id}/members/${memberUserId}`);
+            // Refresh members list by filtering out the removed member
+            setTeamMembers(prevMembers => prevMembers.filter(member => (member.user_id || member.id) !== memberUserId));
         } catch (err) {
             console.error("Error removing member:", err);
+            // Display this error in the members dialog or as a general page error
             setMembersError(err.response?.data?.message || err.message || 'Failed to remove member.');
         }
     };
@@ -266,7 +267,6 @@ function Teams() {
                         <Dialog open={openMembersDialog} onClose={handleCloseMembersDialog} maxWidth="md" fullWidth>
                             <DialogTitle>Manage Members for: {selectedTeam.name}</DialogTitle>
                             <DialogContent>
-                                {membersLoading && <CircularProgress />}
                                 {membersError && <Alert severity="error" sx={{ mb: 2 }}>{membersError}</Alert>}
 
                                 <Typography variant="h6" gutterBottom>Add New Member</Typography>
@@ -283,14 +283,16 @@ function Teams() {
                                                 disabled={isAddingMember || usersLoading}
                                             >
                                                 {usersLoading && <MenuItem value=""><em>Loading users...</em></MenuItem>}
-                                                {!usersLoading && organizationUsers.length === 0 && <MenuItem value=""><em>No users available or API endpoint missing</em></MenuItem>}
+                                                {!usersLoading && organizationUsers.length === 0 && <MenuItem value="" disabled><em>No other users available to add</em></MenuItem>}
                                                 {organizationUsers.map(orgUser => (
+                                                    // Prevent adding users already in the team to the dropdown
+                                                    !teamMembers.find(tm => (tm.user_id || tm.id) === orgUser.id) &&
                                                     <MenuItem key={orgUser.id} value={orgUser.id}>
                                                         {orgUser.username} ({orgUser.email})
                                                     </MenuItem>
                                                 ))}
                                             </Select>
-                                            {addMemberError && <Typography color="error" variant="caption">{addMemberError}</Typography>}
+                                            {addMemberError && <Typography color="error" variant="caption" sx={{mt:1}}>{addMemberError}</Typography>}
                                         </FormControl>
                                     </Grid>
                                     <Grid item xs={4}>
@@ -301,12 +303,13 @@ function Teams() {
                                             fullWidth
                                             startIcon={<AddCircleOutlineIcon />}
                                         >
-                                            {isAddingMember ? <CircularProgress size={24} /> : "Add Member"}
+                                            {isAddingMember ? <CircularProgress size={24} /> : "Add"}
                                         </Button>
                                     </Grid>
                                 </Grid>
                                 
                                 <Typography variant="h6" gutterBottom sx={{mt: 2}}>Current Members</Typography>
+                                {membersLoading && <CircularProgress size={24} />}
                                 {!membersLoading && teamMembers.length === 0 && !membersError && (
                                     <Typography>No members in this team yet.</Typography>
                                 )}

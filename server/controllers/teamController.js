@@ -1,6 +1,7 @@
+// status-page-app/server/controllers/teamController.js
 const { pool } = require('../config/db');
 const ApiError = require('../utils/ApiError');
-const Team = require('../models/Team'); // Using the Team model
+const Team = require('../models/Team'); 
 const logger = require('../config/logger');
 
 const teamController = {
@@ -22,7 +23,7 @@ const teamController = {
             if (error.message && error.message.includes('unique_team_name_org')) {
                  return next(ApiError.conflict('A team with this name already exists in your organization.'));
             }
-            logger.error('Error creating team:', { message: error.message, stack: error.stack });
+            logger.error('Error creating team:', { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to create team.'));
         }
     },
@@ -36,7 +37,7 @@ const teamController = {
             const teams = await Team.findAllByOrganizationId(organization_id);
             res.json(teams);
         } catch (error) {
-            logger.error('Error fetching teams by organization:', { message: error.message, stack: error.stack });
+            logger.error('Error fetching teams by organization:', { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to fetch teams.'));
         }
     },
@@ -53,12 +54,9 @@ const teamController = {
             if (team.organization_id !== organization_id) {
                 return next(ApiError.forbidden('You are not authorized to access this team.'));
             }
-            // Optionally fetch members here if needed, or have a separate route
-            // const members = await Team.findMembers(teamId);
-            // team.members = members;
             res.json(team);
         } catch (error) {
-            logger.error(`Error fetching team by ID ${req.params.teamId}:`, { message: error.message, stack: error.stack });
+            logger.error(`Error fetching team by ID ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to fetch team details.'));
         }
     },
@@ -87,7 +85,7 @@ const teamController = {
              if (error.message && error.message.includes('unique_team_name_org')) {
                  return next(ApiError.conflict('A team with this name already exists in your organization.'));
             }
-            logger.error(`Error updating team ${req.params.teamId}:`, { message: error.message, stack: error.stack });
+            logger.error(`Error updating team ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to update team.'));
         }
     },
@@ -108,7 +106,7 @@ const teamController = {
             await Team.delete(teamId);
             res.status(200).json({ message: 'Team deleted successfully.' });
         } catch (error) {
-            logger.error(`Error deleting team ${req.params.teamId}:`, { message: error.message, stack: error.stack });
+            logger.error(`Error deleting team ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to delete team.'));
         }
     },
@@ -116,48 +114,45 @@ const teamController = {
     async addMemberToTeam(req, res, next) {
         try {
             const { teamId } = req.params;
-            const { userId, role } = req.body; // User to add
-            const organization_id = req.user.organizationId; // Admin's organization
-
-            const team = await Team.findById(teamId);
-            if (!team || team.organization_id !== organization_id) {
-                return next(ApiError.forbidden('Team not found or not accessible.'));
-            }
-
-            // You might want to add a check here to ensure the user being added (userId)
-            // also belongs to the same organization_id.
-            // For now, directly adding.
-
-            const newMember = await Team.addMember(teamId, userId, role);
-            res.status(201).json(newMember);
-        } catch (error) {
-            if (error.message.includes('User is already a member')) {
-                return next(ApiError.conflict(error.message));
-            }
-            logger.error(`Error adding member to team ${req.params.teamId}:`, { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to add member to team.'));
-        }
-    },
-
-    async removeMemberFromTeam(req, res, next) {
-        try {
-            const { teamId, memberUserId } = req.params; // memberUserId is the user to remove
-            const organization_id = req.user.organizationId; // Admin's organization
+            const { userId, role } = req.body; 
+            const organization_id = req.user.organizationId; 
 
             const team = await Team.findById(teamId);
             if (!team || team.organization_id !== organization_id) {
                 return next(ApiError.forbidden('Team not found or not accessible.'));
             }
             
-            // Add check: prevent user from removing themselves if they are the only admin, etc. (complex logic)
+            const newMember = await Team.addMember(teamId, userId, role || 'member');
+            res.status(201).json(newMember);
+        } catch (error) {
+            if (error.message && error.message.includes('User is already a member')) {
+                return next(ApiError.conflict(error.message));
+            }
+            if (error.code === '23503') { // Foreign key violation
+                 return next(ApiError.badRequest('User to be added not found or team does not exist.'));
+            }
+            logger.error(`Error adding member to team ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId, memberToAdd: userId });
+            next(ApiError.internalServerError('Failed to add member to team.'));
+        }
+    },
 
+    async removeMemberFromTeam(req, res, next) {
+        try {
+            const { teamId, memberUserId } = req.params; 
+            const organization_id = req.user.organizationId; 
+
+            const team = await Team.findById(teamId);
+            if (!team || team.organization_id !== organization_id) {
+                return next(ApiError.forbidden('Team not found or not accessible.'));
+            }
+            
             const result = await Team.removeMember(teamId, memberUserId);
             if (!result) {
                 return next(ApiError.notFound('Team member not found or not removed.'));
             }
             res.status(200).json({ message: 'Member removed from team successfully.' });
         } catch (error) {
-            logger.error(`Error removing member ${req.params.memberUserId} from team ${req.params.teamId}:`, { message: error.message, stack: error.stack });
+            logger.error(`Error removing member ${req.params.memberUserId} from team ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to remove member from team.'));
         }
     },
@@ -175,7 +170,7 @@ const teamController = {
             const members = await Team.findMembers(teamId);
             res.json(members);
         } catch (error) {
-            logger.error(`Error fetching members for team ${req.params.teamId}:`, { message: error.message, stack: error.stack });
+            logger.error(`Error fetching members for team ${req.params.teamId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
             next(ApiError.internalServerError('Failed to fetch team members.'));
         }
     }

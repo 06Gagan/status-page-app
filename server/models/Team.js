@@ -1,3 +1,4 @@
+// status-page-app/server/models/Team.js
 const { pool } = require('../config/db');
 
 const Team = {
@@ -32,13 +33,8 @@ const Team = {
     },
 
     async delete(id, client = null) {
-        const db = client || pool; // Use the passed client or the global pool
-        // The actual transaction handling (BEGIN, COMMIT, ROLLBACK) should be done by the calling function
-        // if 'client' is provided.
-        
-        // First, remove all members from the team using the same db client
+        const db = client || pool;
         await db.query('DELETE FROM TeamMembers WHERE team_id = $1', [id]);
-        // Then, delete the team
         const result = await db.query('DELETE FROM Teams WHERE id = $1 RETURNING *', [id]);
         return result.rows.length > 0 ? result.rows[0] : null;
     },
@@ -54,7 +50,6 @@ const Team = {
             if (error.code === '23505') { 
                 throw new Error('User is already a member of this team.');
             }
-            // Re-throw other errors to be caught by the transactional block if 'client' was used
             throw error;
         }
     },
@@ -70,7 +65,7 @@ const Team = {
     async findMembers(team_id, client = null) {
         const db = client || pool;
         const query = `
-            SELECT u.id, u.username, u.email, tm.role, tm.joined_at
+            SELECT u.id as user_id, u.username, u.email, tm.role, tm.joined_at
             FROM Users u
             JOIN TeamMembers tm ON u.id = tm.user_id
             WHERE tm.team_id = $1

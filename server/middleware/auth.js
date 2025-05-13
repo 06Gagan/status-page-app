@@ -4,8 +4,6 @@ const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
-const HARDCODED_TEST_SECRET = "MySimpleTestSecretAlphaNumeric123"; // Test Secret - MUST MATCH authController.js
-
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const clientToken = authHeader && authHeader.split(' ')[1];
@@ -15,12 +13,18 @@ const authenticateToken = async (req, res, next) => {
         return next(ApiError.unauthorized('Authentication token required.'));
     }
     
-    logger.info(`[authenticateToken] DEBUG_MODE: Verifying token with HARDCODED_TEST_SECRET: "${HARDCODED_TEST_SECRET}"`);
     logger.info(`[authenticateToken] DEBUG_MODE: Token received from client for verification: "${clientToken}"`);
 
+    const secretForVerification = process.env.JWT_SECRET;
+    logger.info(`[authenticateToken] DEBUG: Actual JWT_SECRET used for verification: "${secretForVerification}"`);
+
+    if (!secretForVerification || secretForVerification.length < 16 || secretForVerification === 'your-super-secret-jwt-key-change-this-in-production') {
+        logger.error('[authenticateToken] CRITICAL: JWT_SECRET is missing, placeholder, or too short. This will cause all token verifications to fail.');
+        return next(ApiError.internalServerError('Server authentication configuration error (secret key issue).'));
+    }
 
     try {
-        const decodedClient = jwt.verify(clientToken, HARDCODED_TEST_SECRET); // Using hardcoded secret
+        const decodedClient = jwt.verify(clientToken, secretForVerification);
         
         const user = await User.findById(decodedClient.userId); 
         if (!user) {
@@ -34,15 +38,15 @@ const authenticateToken = async (req, res, next) => {
             role: user.role,
             email: user.email
         };
-        logger.info(`[authenticateToken] Client token verified successfully for user ID: ${req.user.userId} using hardcoded secret.`);
+        logger.info(`[authenticateToken] Client token verified successfully for user ID: ${req.user.userId}`);
         next();
     } catch (err) {
-        logger.warn(`[authenticateToken] Client token verification FAILED (with hardcoded secret). Error: ${err.name}, Message: ${err.message}`);
+        logger.warn(`[authenticateToken] Client token verification failed. Error: ${err.name}, Message: ${err.message}`);
         if (err.name === 'TokenExpiredError') {
             return next(ApiError.unauthorized('Token expired.'));
         }
-        if (err.name === 'JsonWebTokenError') { // Catches invalid signature, malformed token, etc.
-            return next(ApiError.forbidden('Invalid token (e.g., signature mismatch).'));
+        if (err.name === 'JsonWebTokenError') { 
+            return next(ApiError.forbidden('Invalid token.'));
         }
         logger.error('[authenticateToken] Unexpected error during client token verification:', { message: err.message, stack: err.stack });
         return next(ApiError.internalServerError('Authentication failed due to an unexpected error.'));

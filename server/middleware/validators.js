@@ -1,3 +1,4 @@
+// status-page-app/server/middleware/validators.js
 const { body, param, query } = require('express-validator');
 
 const validateRegistration = [
@@ -46,12 +47,24 @@ const validateIncidentId = [
     param('incidentId').isUUID(4).withMessage('Incident ID must be a valid UUID version 4.')
 ];
 
-const validateService = [
+// For creating a service (name and status are required)
+const validateServiceCreation = [
     body('name').trim().notEmpty().withMessage('Service name is required.'),
     body('description').optional({ checkFalsy: true }).trim(),
-    body('status').isIn(['operational', 'degraded_performance', 'partial_outage', 'major_outage', 'under_maintenance'])
+    body('status').trim().notEmpty().withMessage('Service status is required.')
+        .isIn(['operational', 'degraded_performance', 'partial_outage', 'major_outage', 'under_maintenance'])
         .withMessage('Invalid service status.'),
     body('order').optional().isInt({ min: 0 }).withMessage('Order must be a non-negative integer.')
+];
+
+// For updating a service (all fields are optional, but if provided, they must be valid)
+const validateServiceUpdate = [
+    body('name').optional().trim().notEmpty().withMessage('Service name cannot be empty if provided.'),
+    body('description').optional({ checkFalsy: true }).trim(),
+    body('status').optional().trim().notEmpty().withMessage('Service status cannot be empty if provided.')
+        .isIn(['operational', 'degraded_performance', 'partial_outage', 'major_outage', 'under_maintenance'])
+        .withMessage('Invalid service status.'),
+    body('order').optional().isInt({ min: 0 }).withMessage('Order must be a non-negative integer if provided.')
 ];
 
 const validateServiceId = [
@@ -62,8 +75,8 @@ const validateTeamCreation = [
     body('name').trim().notEmpty().withMessage('Team name is required.'),
 ];
 
-const validateTeamUpdate = [
-    body('name').trim().notEmpty().withMessage('Team name is required.'),
+const validateTeamUpdate = [ // This was likely intended for team updates
+    body('name').optional().trim().notEmpty().withMessage('Team name cannot be empty if provided.'),
 ];
 
 const validateTeamId = [
@@ -90,7 +103,8 @@ module.exports = {
     validateIncident,
     validateIncidentUpdateLog,
     validateIncidentId,
-    validateService,
+    validateServiceCreation, // Renamed from validateService for clarity
+    validateServiceUpdate,   // New/Updated for service updates
     validateServiceId,
     validateTeamCreation, 
     validateTeamUpdate,   

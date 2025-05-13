@@ -1,6 +1,6 @@
 // status-page-app/client/src/contexts/AuthContext.js
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api from '../config/api'; // Your pre-configured Axios instance
+import api from '../config/api';
 import { useNavigate } from 'react-router-dom';
 import { Box, CircularProgress, Typography } from '@mui/material';
 
@@ -16,64 +16,63 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
-    const [token, setToken] = useState(null); // Initialized to null
-    const [loading, setLoading] = useState(true); // True until initial check is done
+    const [token, setToken] = useState(null); 
+    const [loading, setLoading] = useState(true); 
     const [error, setError] = useState(null);
     const navigate = useNavigate();
 
-    // This function is the single source of truth for setting/clearing token related things
     const handleNewToken = useCallback((newToken) => {
         if (newToken) {
             console.log(`[AuthContext] handleNewToken: Setting token (first 20): ${newToken.substring(0,20)}...`);
             sessionStorage.setItem('token', newToken);
             api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-            setToken(newToken); // Update React state
+            setToken(newToken); 
         } else {
             console.log('[AuthContext] handleNewToken: Clearing token.');
             sessionStorage.removeItem('token');
             delete api.defaults.headers.common['Authorization'];
-            setToken(null); // Update React state
+            setToken(null); 
         }
     }, []);
 
     const fetchUserProfile = useCallback(async (currentTokenForFetch) => {
         console.log(`[AuthContext] fetchUserProfile called with token (first 20): ${currentTokenForFetch ? currentTokenForFetch.substring(0,20)+'...' : 'null'}`);
         if (!currentTokenForFetch) {
-            setUser(null); // No user if no token
+            setUser(null); 
             setLoading(false);
             return;
         }
         try {
-            // Axios instance 'api' should use its interceptor or default header
-            const response = await api.get('/auth/profile');
+            const headers = { Authorization: `Bearer ${currentTokenForFetch}` };
+            const response = await api.get('/auth/profile', { headers });
             console.log('[AuthContext] Profile fetched successfully:', response.data);
             setUser(response.data);
             setError(null);
+            if (token !== currentTokenForFetch) setToken(currentTokenForFetch); // Sync state if needed
         } catch (err) {
             console.error("[AuthContext] Failed to fetch profile:", err.response?.data || err.message);
-            handleNewToken(null); // Clear everything if profile fetch fails (token likely invalid)
+            handleNewToken(null); 
             setUser(null);
         } finally {
             setLoading(false);
         }
-    }, [handleNewToken]);
+    }, [handleNewToken, token]); // token is a dependency here to ensure consistency if it's used for comparison
 
-    // Effect for initial load: check sessionStorage for a token
     useEffect(() => {
         const initialToken = sessionStorage.getItem('token');
         console.log(`[AuthContext] Initial load: Token from sessionStorage (first 20): ${initialToken ? initialToken.substring(0,20)+'...' : 'null'}`);
         if (initialToken) {
-            handleNewToken(initialToken); // Set up token state and Axios default
+            handleNewToken(initialToken); 
             fetchUserProfile(initialToken);
         } else {
-            setLoading(false); // No token, not loading, not authenticated
+            setLoading(false); 
             setUser(null);
             setToken(null);
         }
-    }, [handleNewToken, fetchUserProfile]); // Dependencies are stable callbacks
+    }, [handleNewToken, fetchUserProfile]); // These are stable due to useCallback
 
     const login = async (credentials) => {
-        setLoading(true); // Indicate login process started
+        setLoading(true); 
         setError(null);
         try {
             const response = await api.post('/auth/login', credentials);
@@ -82,7 +81,7 @@ export const AuthProvider = ({ children }) => {
                 console.log(`[AuthContext] Login successful. Token from server (first 20): ${receivedToken.substring(0,20)}...`);
                 handleNewToken(receivedToken);
                 setUser(response.data.user);
-                setLoading(false); // Login process finished
+                setLoading(false); 
                 return response.data.user;
             } else {
                 throw new Error('Invalid login response from server.');
@@ -91,9 +90,9 @@ export const AuthProvider = ({ children }) => {
             const errorMessage = err.response?.data?.message || err.message || 'Login failed.';
             console.error('[AuthContext] Login failed:', errorMessage);
             setError(errorMessage);
-            handleNewToken(null); // Clear token on failed login
+            handleNewToken(null); 
             setUser(null);
-            setLoading(false); // Login process finished (with error)
+            setLoading(false); 
             throw new Error(errorMessage);
         }
     };
@@ -139,7 +138,7 @@ export const AuthProvider = ({ children }) => {
             if (updatedUser && updatedUser.id) {
                  setUser(updatedUser);
             } else {
-                 await fetchUserProfile(token); // Refetch with current token state
+                 await fetchUserProfile(token); 
             }
             return updatedUser;
         } catch (err) {
@@ -155,24 +154,21 @@ export const AuthProvider = ({ children }) => {
 
     const value = {
         user,
-        token, // The current token from React state
-        loading, // Auth loading state
+        token, 
+        loading, 
         error,
-        isAuthenticated,
+        isAuthenticated, 
         login,
         register,
         logout,
         updateProfileContext,
         clearError,
         setError,
-        refreshProfile: () => fetchUserProfile(token), // Use current token state for refresh
-        // setAuthToken is not directly exposed; use login/logout/initial load
-        setUser // Expose setUser if needed for direct manipulation (use with caution)
+        refreshProfile: () => fetchUserProfile(token), 
+        setUser 
     };
 
-    // Show loading indicator only during the very initial token check
-    if (loading && !token && !user && sessionStorage.getItem('token')) {
-         // This case is when there's a token in storage, but we haven't verified it yet.
+    if (loading && !user && sessionStorage.getItem('token')) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
                 <CircularProgress />

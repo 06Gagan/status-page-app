@@ -1,286 +1,270 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Container,
-  Paper,
-  Typography,
-  Box,
-  Grid,
-  TextField,
-  Button,
-  Alert,
-  CircularProgress,
-  Chip,
-  Divider,
-  List,
-  ListItem,
-  ListItemText
-} from '@mui/material';
-import { Add as AddIcon } from '@mui/icons-material';
-import api from '../config/api';
+// status-page-app/client/src/pages/Profile.js
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../config/api';
+import {
+    Container, Box, Typography, TextField, Button,
+    CircularProgress, Alert, Grid, Paper, List, ListItem,
+    ListItemText, Divider, Link as MuiLink
+} from '@mui/material';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'; // <<< IMPORT ADDED HERE
+import { Link as RouterLink } from 'react-router-dom'; // Removed unused useNavigate
 
-const Profile = () => {
-  const { user, updateProfile } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [teams, setTeams] = useState([]);
-  const [services, setServices] = useState([]);
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: ''
-  });
+function Profile() {
+    const { user, token, loading: authLoading, updateProfileContext /*, refreshProfile */ } = useAuth(); // refreshProfile commented out if not used
+    // const navigate = useNavigate(); // Commented out if not used
 
-  useEffect(() => {
-    let isMounted = true;
-    const controller = new AbortController();
+    const [profileData, setProfileData] = useState(null);
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [currentPassword, setCurrentPassword] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
-    const fetchUserData = async () => {
-      try {
-        setLoading(true);
-        const [profileRes, teamsRes, servicesRes] = await Promise.all([
-          api.get('/auth/profile', { signal: controller.signal }),
-          api.get('/teams', { signal: controller.signal }),
-          api.get('/services', { signal: controller.signal })
-        ]);
+    const [loadingProfile, setLoadingProfile] = useState(true);
+    const [updateError, setUpdateError] = useState('');
+    const [passwordError, setPasswordError] = useState('');
+    const [updateSuccess, setUpdateSuccess] = useState('');
+    const [passwordSuccess, setPasswordSuccess] = useState('');
+    const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+    const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-        if (isMounted) {
-          setFormData(prev => ({
-            ...prev,
-            name: profileRes.data.data?.name || '',
-            email: profileRes.data.data?.email || ''
-          }));
-          setTeams(teamsRes.data.data || []);
-          setServices(servicesRes.data.data || []);
+    const fetchProfileData = useCallback(async () => {
+        if (!token) {
+            setLoadingProfile(false);
+            return;
         }
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          return;
+        setLoadingProfile(true);
+        try {
+            const response = await api.get('/auth/profile', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setProfileData(response.data);
+            setName(response.data.username || '');
+            setEmail(response.data.email || '');
+        } catch (error) {
+            console.error("Error fetching profile data:", error);
+            setUpdateError("Failed to load profile data.");
+        } finally {
+            setLoadingProfile(false);
         }
-        if (isMounted) {
-          setError('Failed to fetch user data');
-          console.error('Error fetching user data:', error);
+    }, [token]);
+
+    useEffect(() => {
+        if (!authLoading && user) { 
+            setName(user.username || '');
+            setEmail(user.email || '');
+            fetchProfileData();
+        } else if (!authLoading && !user) {
+            setUpdateError("Not authenticated.");
+            setLoadingProfile(false);
         }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
+    }, [user, authLoading, fetchProfileData]);
+
+
+    const handleProfileUpdate = async (e) => {
+        e.preventDefault();
+        setUpdateError('');
+        setUpdateSuccess('');
+        setIsUpdatingProfile(true);
+        try {
+            await updateProfileContext({ username: name, email });
+            setUpdateSuccess('Profile updated successfully!');
+        } catch (err) {
+            setUpdateError(err.message || 'Failed to update profile.');
+        } finally {
+            setIsUpdatingProfile(false);
         }
-      }
     };
 
-    fetchUserData();
-
-    return () => {
-      isMounted = false;
-      controller.abort();
+    const handlePasswordUpdate = async (e) => {
+        e.preventDefault();
+        setPasswordError('');
+        setPasswordSuccess('');
+        if (newPassword !== confirmNewPassword) {
+            setPasswordError("New passwords do not match.");
+            return;
+        }
+        if (newPassword.length < 6) {
+            setPasswordError("New password must be at least 6 characters long.");
+            return;
+        }
+        setIsUpdatingPassword(true);
+        try {
+            await api.put('/auth/profile/password', 
+                { currentPassword, newPassword },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setPasswordSuccess('Password updated successfully!');
+            setCurrentPassword('');
+            setNewPassword('');
+            setConfirmNewPassword('');
+        } catch (err) {
+            setPasswordError(err.response?.data?.message || err.message || 'Failed to update password.');
+        } finally {
+            setIsUpdatingPassword(false);
+        }
     };
-  }, []);
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-    setLoading(true);
-
-    try {
-      if (formData.newPassword) {
-        if (formData.newPassword !== formData.confirmPassword) {
-          throw new Error('New passwords do not match');
-        }
-        if (!formData.currentPassword) {
-          throw new Error('Current password is required to set a new password');
-        }
-      }
-
-      await updateProfile({
-        name: formData.name,
-        email: formData.email,
-        currentPassword: formData.currentPassword,
-        newPassword: formData.newPassword
-      });
-
-      setSuccess('Profile updated successfully');
-      setFormData(prev => ({
-        ...prev,
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-      }));
-    } catch (error) {
-      setError(error.response?.data?.message || error.message);
-    } finally {
-      setLoading(false);
+    
+    if (authLoading || loadingProfile) {
+        return (
+            <Container>
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+                    <CircularProgress />
+                </Box>
+            </Container>
+        );
     }
-  };
 
-  if (loading && !user) {
+    if (!user && !authLoading) { 
+        return (
+            <Container>
+                <Alert severity="error">You are not logged in. Please <MuiLink component={RouterLink} to="/login">login</MuiLink> to view your profile.</Alert>
+            </Container>
+        );
+    }
+
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-      </Box>
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+            <Typography variant="h4" gutterBottom>My Profile</Typography>
+            <Grid container spacing={4}>
+                <Grid item xs={12} md={7}>
+                    <Paper sx={{ p: 3 }}>
+                        <Typography variant="h6" gutterBottom>Profile Information</Typography>
+                        {updateError && <Alert severity="error" sx={{ mb: 2 }}>{updateError}</Alert>}
+                        {updateSuccess && <Alert severity="success" sx={{ mb: 2 }}>{updateSuccess}</Alert>}
+                        <Box component="form" onSubmit={handleProfileUpdate} noValidate>
+                            <TextField
+                                margin="normal"
+                                required
+                                fullWidth
+                                id="name"
+                                label="Name"
+                                name="name"
+                                autoComplete="name"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                disabled={isUpdatingProfile}
+                            />
+                            <TextField
+                                margin="normal"
+                                required
+                                fullWidth
+                                id="email"
+                                label="Email Address"
+                                name="email"
+                                autoComplete="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                disabled={isUpdatingProfile}
+                            />
+                            <Button
+                                type="submit"
+                                fullWidth
+                                variant="contained"
+                                sx={{ mt: 3, mb: 2 }}
+                                disabled={isUpdatingProfile}
+                            >
+                                {isUpdatingProfile ? <CircularProgress size={24} /> : 'Update Profile'}
+                            </Button>
+                        </Box>
+                        <Divider sx={{ my: 3 }} />
+                        <Typography variant="h6" gutterBottom>Change Password</Typography>
+                        {passwordError && <Alert severity="error" sx={{ mb: 2 }}>{passwordError}</Alert>}
+                        {passwordSuccess && <Alert severity="success" sx={{ mb: 2 }}>{passwordSuccess}</Alert>}
+                        <Box component="form" onSubmit={handlePasswordUpdate} noValidate>
+                            <TextField
+                                margin="normal"
+                                required
+                                fullWidth
+                                name="currentPassword"
+                                label="Current Password"
+                                type="password"
+                                id="currentPassword"
+                                value={currentPassword}
+                                onChange={(e) => setCurrentPassword(e.target.value)}
+                                disabled={isUpdatingPassword}
+                            />
+                            <TextField
+                                margin="normal"
+                                required
+                                fullWidth
+                                name="newPassword"
+                                label="New Password"
+                                type="password"
+                                id="newPassword"
+                                value={newPassword}
+                                onChange={(e) => setNewPassword(e.target.value)}
+                                disabled={isUpdatingPassword}
+                            />
+                            <TextField
+                                margin="normal"
+                                required
+                                fullWidth
+                                name="confirmNewPassword"
+                                label="Confirm New Password"
+                                type="password"
+                                id="confirmNewPassword"
+                                value={confirmNewPassword}
+                                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                disabled={isUpdatingPassword}
+                            />
+                            <Button
+                                type="submit"
+                                fullWidth
+                                variant="contained"
+                                sx={{ mt: 3, mb: 2 }}
+                                disabled={isUpdatingPassword}
+                            >
+                                {isUpdatingPassword ? <CircularProgress size={24} /> : 'Change Password'}
+                            </Button>
+                        </Box>
+                    </Paper>
+                </Grid>
+                <Grid item xs={12} md={5}>
+                    <Paper sx={{ p: 3, mb: 3 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="h6">My Teams</Typography>
+                            {user?.role === 'admin' && 
+                                <Button component={RouterLink} to="/teams" size="small" startIcon={<AddCircleOutlineIcon />}>Manage Teams</Button>
+                            }
+                        </Box>
+                        {profileData?.teams && profileData.teams.length > 0 ? (
+                            <List dense>
+                                {profileData.teams.map(team => (
+                                    <ListItem key={team.id} disablePadding>
+                                        <ListItemText primary={team.name} secondary={`Role: ${team.role || 'Member'}`} />
+                                    </ListItem>
+                                ))}
+                            </List>
+                        ) : (
+                            <Typography color="text.secondary">You are not part of any teams yet.</Typography>
+                        )}
+                    </Paper>
+                    <Paper sx={{ p: 3 }}>
+                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="h6">My Organization's Services</Typography>
+                             {(user?.role === 'admin' || user?.role === 'editor') && 
+                                <Button component={RouterLink} to="/services" size="small" startIcon={<AddCircleOutlineIcon />}>Manage Services</Button>
+                            }
+                        </Box>
+                        {profileData?.services && profileData.services.length > 0 ? (
+                            <List dense>
+                                {profileData.services.slice(0, 5).map(service => ( 
+                                    <ListItem key={service.id} disablePadding>
+                                        <ListItemText primary={service.name} secondary={`Status: ${service.status}`} />
+                                    </ListItem>
+                                ))}
+                                {profileData.services.length > 5 && <ListItemText secondary="...and more." />}
+                            </List>
+                        ) : (
+                            <Typography color="text.secondary">No services configured for your organization.</Typography>
+                        )}
+                    </Paper>
+                </Grid>
+            </Grid>
+        </Container>
     );
-  }
+}
 
-  return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Grid container spacing={3}>
-        {/* Profile Information */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Profile Information
-            </Typography>
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-            {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
-            <form onSubmit={handleSubmit}>
-              <TextField
-                fullWidth
-                label="Name"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                margin="normal"
-                required
-              />
-              <TextField
-                fullWidth
-                label="Email"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleChange}
-                margin="normal"
-                required
-              />
-              <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>
-                Change Password
-              </Typography>
-              <TextField
-                fullWidth
-                label="Current Password"
-                name="currentPassword"
-                type="password"
-                value={formData.currentPassword}
-                onChange={handleChange}
-                margin="normal"
-              />
-              <TextField
-                fullWidth
-                label="New Password"
-                name="newPassword"
-                type="password"
-                value={formData.newPassword}
-                onChange={handleChange}
-                margin="normal"
-              />
-              <TextField
-                fullWidth
-                label="Confirm New Password"
-                name="confirmPassword"
-                type="password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                margin="normal"
-              />
-              <Button
-                type="submit"
-                variant="contained"
-                fullWidth
-                sx={{ mt: 2 }}
-                disabled={loading}
-              >
-                {loading ? <CircularProgress size={24} /> : 'Update Profile'}
-              </Button>
-            </form>
-          </Paper>
-        </Grid>
-
-        {/* Teams and Services */}
-        <Grid item xs={12} md={6}>
-          {/* Teams Section */}
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">My Teams</Typography>
-              <Button
-                startIcon={<AddIcon />}
-                onClick={() => window.location.href = '/teams'}
-              >
-                Manage Teams
-              </Button>
-            </Box>
-            <List>
-              {teams.map((team) => (
-                <React.Fragment key={team.id}>
-                  <ListItem>
-                    <ListItemText
-                      primary={team.name}
-                      secondary={team.description}
-                    />
-                  </ListItem>
-                  <Divider />
-                </React.Fragment>
-              ))}
-              {teams.length === 0 && (
-                <ListItem>
-                  <ListItemText primary="No teams found" />
-                </ListItem>
-              )}
-            </List>
-          </Paper>
-
-          {/* Services Section */}
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">My Services</Typography>
-              <Button
-                startIcon={<AddIcon />}
-                onClick={() => window.location.href = '/services'}
-              >
-                Manage Services
-              </Button>
-            </Box>
-            <List>
-              {services.map((service) => (
-                <React.Fragment key={service.id}>
-                  <ListItem>
-                    <ListItemText
-                      primary={service.name}
-                      secondary={service.description}
-                    />
-                    <Chip
-                      label={service.status}
-                      color={
-                        service.status === 'operational' ? 'success' :
-                        service.status === 'degraded' ? 'warning' :
-                        'error'
-                      }
-                      size="small"
-                    />
-                  </ListItem>
-                  <Divider />
-                </React.Fragment>
-              ))}
-              {services.length === 0 && (
-                <ListItem>
-                  <ListItemText primary="No services found" />
-                </ListItem>
-              )}
-            </List>
-          </Paper>
-        </Grid>
-      </Grid>
-    </Container>
-  );
-};
-
-export default Profile; 
+export default Profile;
