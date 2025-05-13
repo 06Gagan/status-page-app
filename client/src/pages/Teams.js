@@ -58,9 +58,8 @@ function Teams() {
     const fetchOrganizationUsers = useCallback(async () => {
         if (!token || !isAdmin) return;
         setUsersLoading(true);
-        setAddMemberError(''); // Clear previous errors
+        setAddMemberError(''); 
         try {
-            // This now correctly calls GET /api/v1/users
             const response = await api.get('/users'); 
             setOrganizationUsers(response.data || []);
             if (!response.data || response.data.length === 0) {
@@ -80,7 +79,7 @@ function Teams() {
         if (!authLoading && isAuthenticated) {
             fetchTeams();
             if (isAdmin) {
-                fetchOrganizationUsers(); // Call this when the component mounts if user is admin
+                fetchOrganizationUsers();
             }
         } else if (!authLoading && !isAuthenticated) {
             setError("Not authenticated. Please log in.");
@@ -129,7 +128,6 @@ function Teams() {
         setTeamMembers([]);
         setSelectedUserToAdd('');
         setAddMemberError('');
-        // Fetch organization users again here if it might have changed or if not fetched initially
         if (isAdmin && organizationUsers.length === 0 && !usersLoading) {
             fetchOrganizationUsers();
         }
@@ -155,13 +153,10 @@ function Teams() {
         setIsAddingMember(true);
         setAddMemberError('');
         try {
-            // Your backend teamController for addMemberToTeam expects { userId, role }
-            // Role can be defaulted to 'member' or you can add a UI element for it
             await api.post(`/teams/${selectedTeam.id}/members`, { userId: selectedUserToAdd, role: 'member' });
-            // Refresh members list for the current team
             const response = await api.get(`/teams/${selectedTeam.id}/members`);
             setTeamMembers(response.data || []);
-            setSelectedUserToAdd(''); // Reset selection
+            setSelectedUserToAdd('');
         } catch (err) {
             console.error("Error adding member:", err);
             setAddMemberError(err.response?.data?.message || err.message || 'Failed to add member.');
@@ -172,14 +167,11 @@ function Teams() {
 
     const handleRemoveMember = async (memberUserId) => {
         if (!selectedTeam || !memberUserId || !isAdmin) return;
-        // Optional: Add a confirmation dialog before removing
         try {
             await api.delete(`/teams/${selectedTeam.id}/members/${memberUserId}`);
-            // Refresh members list by filtering out the removed member
             setTeamMembers(prevMembers => prevMembers.filter(member => (member.user_id || member.id) !== memberUserId));
         } catch (err) {
             console.error("Error removing member:", err);
-            // Display this error in the members dialog or as a general page error
             setMembersError(err.response?.data?.message || err.message || 'Failed to remove member.');
         }
     };
@@ -285,7 +277,6 @@ function Teams() {
                                                 {usersLoading && <MenuItem value=""><em>Loading users...</em></MenuItem>}
                                                 {!usersLoading && organizationUsers.length === 0 && <MenuItem value="" disabled><em>No other users available to add</em></MenuItem>}
                                                 {organizationUsers.map(orgUser => (
-                                                    // Prevent adding users already in the team to the dropdown
                                                     !teamMembers.find(tm => (tm.user_id || tm.id) === orgUser.id) &&
                                                     <MenuItem key={orgUser.id} value={orgUser.id}>
                                                         {orgUser.username} ({orgUser.email})

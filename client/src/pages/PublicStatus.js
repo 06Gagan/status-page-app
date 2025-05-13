@@ -1,13 +1,15 @@
+// status-page-app/client/src/pages/PublicStatus.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link as RouterLink } from 'react-router-dom';
 import api from '../config/api';
-import { useAuth } from '../contexts/AuthContext'; // Import useAuth
+import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import {
     Container, Typography, Box, List, ListItem, ListItemText,
     CircularProgress, Alert, Paper, Divider, Chip, Grid, Link,
-    ListItemIcon // Import ListItemIcon
+    ListItemIcon
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles'; // Import useTheme
+import { useTheme } from '@mui/material/styles';
 import CircleIcon from '@mui/icons-material/Circle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -17,11 +19,11 @@ import HistoryIcon from '@mui/icons-material/History';
 import BusinessIcon from '@mui/icons-material/Business';
 
 const serviceStatusOptions = [
-    { value: 'operational', label: 'Operational', color: 'success', icon: <CheckCircleOutlineIcon fontSize="inherit" /> },
-    { value: 'degraded_performance', label: 'Degraded Performance', color: 'warning', icon: <ReportProblemOutlinedIcon fontSize="inherit" /> },
-    { value: 'partial_outage', label: 'Partial Outage', color: 'warning', icon: <ReportProblemOutlinedIcon fontSize="inherit" /> },
-    { value: 'major_outage', label: 'Major Outage', color: 'error', icon: <ErrorOutlineIcon fontSize="inherit" /> },
-    { value: 'under_maintenance', label: 'Under Maintenance', color: 'info', icon: <ConstructionOutlinedIcon fontSize="inherit" /> },
+    { value: 'operational', label: 'Operational', color: 'success', IconComponent: CheckCircleOutlineIcon },
+    { value: 'degraded_performance', label: 'Degraded Performance', color: 'warning', IconComponent: ReportProblemOutlinedIcon },
+    { value: 'partial_outage', label: 'Partial Outage', color: 'warning', IconComponent: ReportProblemOutlinedIcon },
+    { value: 'major_outage', label: 'Major Outage', color: 'error', IconComponent: ErrorOutlineIcon },
+    { value: 'under_maintenance', label: 'Under Maintenance', color: 'info', IconComponent: ConstructionOutlinedIcon },
 ];
 
 const incidentStatusOptions = [
@@ -42,15 +44,17 @@ const incidentSeverityOptions = [
 const getStatusDisplay = (value, type = 'service') => {
     const options = type === 'service' ? serviceStatusOptions : (type === 'incident' ? incidentStatusOptions : incidentSeverityOptions);
     const option = options.find(opt => opt.value === value);
-    return option || { value, label: value, color: 'default', icon: <CircleIcon fontSize="inherit" /> };
+    const IconToRender = option?.IconComponent || CircleIcon; 
+    return option ? { ...option, icon: <IconToRender fontSize="inherit" /> } : { value, label: value, color: 'default', icon: <CircleIcon fontSize="inherit" /> };
 };
 
-
 function PublicStatusPage() {
-    const theme = useTheme(); // Initialize theme
+    const theme = useTheme();
     const { slug } = useParams();
-    const { user, isAuthenticated } = useAuth(); // Get user and isAuthenticated for conditional link
-    const [organization, setOrganization] = useState(null);
+    const { user, isAuthenticated } = useAuth(); 
+    const { socket, isConnected } = useSocket();
+
+    const [organization, setOrganization] = useState(null); // Will store { id, name, slug }
     const [services, setServices] = useState([]);
     const [incidents, setIncidents] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -65,7 +69,7 @@ function PublicStatusPage() {
         setLoading(true);
         setError('');
         try {
-            const orgPromise = api.get(`/organizations/${slug}`);
+            const orgPromise = api.get(`/organizations/${slug}`); // This should return { id, name, slug }
             const servicesPromise = api.get(`/organizations/${slug}/services`);
             const incidentsPromise = api.get(`/organizations/${slug}/incidents`);
 
@@ -74,8 +78,15 @@ function PublicStatusPage() {
                 servicesPromise,
                 incidentsPromise
             ]);
-
-            setOrganization(orgResponse.data || { name: slug, slug: slug });
+            
+            // IMPORTANT: Ensure orgResponse.data contains the 'id' of the organization
+            if (orgResponse.data && orgResponse.data.id) {
+                setOrganization(orgResponse.data);
+            } else {
+                // Fallback if org details (especially ID) are not fetched
+                setOrganization({ name: slug, slug: slug, id: null }); 
+                console.warn("Organization details (especially ID) not fetched for slug:", slug);
+            }
             setServices(servicesResponse.data || []);
             setIncidents(incidentsResponse.data || []);
 
@@ -87,7 +98,7 @@ function PublicStatusPage() {
             } else {
                 setError(message);
             }
-            setOrganization({ name: slug, slug: slug });
+            setOrganization({ name: slug, slug: slug, id: null });
             setServices([]);
             setIncidents([]);
         } finally {
@@ -98,6 +109,94 @@ function PublicStatusPage() {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // Effect for joining the organization-specific room via socket
+    useEffect(() => {
+        if (isConnected && socket && organization && organization.id) {
+            const roomToJoin = `organization-${organization.id}`;
+            console.log(`[PublicStatusPage] Attempting to join room: ${roomToJoin}`);
+            socket.emit('joinPublicRoom', organization.id); // Send org ID to server
+        } else {
+            if (isConnected && socket && organization && !organization.id) {
+                console.warn('[PublicStatusPage] Socket connected, but organization ID is missing. Cannot join room.');
+            }
+        }
+    }, [isConnected, socket, organization]);
+
+
+    // Socket event listeners for real-time updates
+    useEffect(() => {
+        if (isConnected && socket && organization && organization.id) {
+            console.log(`[PublicStatusPage] Socket connected, setting up data listeners for org ID: ${organization.id}`);
+
+            const handleServiceCreated = (newService) => {
+                if (newService && newService.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: serviceCreated', newService);
+                    setServices(prevServices => {
+                        if (prevServices.find(s => s.id === newService.id)) return prevServices;
+                        return [newService, ...prevServices];
+                    });
+                }
+            };
+            const handleServiceUpdated = (updatedService) => {
+                 if (updatedService && updatedService.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: serviceUpdated', updatedService);
+                    setServices(prevServices => 
+                        prevServices.map(s => s.id === updatedService.id ? updatedService : s)
+                    );
+                }
+            };
+            const handleServiceDeleted = (deletedData) => {
+                if (deletedData && deletedData.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: serviceDeleted', deletedData);
+                    setServices(prevServices => prevServices.filter(s => s.id !== deletedData.id));
+                }
+            };
+            const handleIncidentCreated = (newIncident) => {
+                 if (newIncident && newIncident.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: incidentCreated', newIncident);
+                    setIncidents(prevIncidents => {
+                         if (prevIncidents.find(i => i.id === newIncident.id)) return prevIncidents;
+                         return [newIncident, ...prevIncidents];
+                    });
+                }
+            };
+            const handleIncidentUpdated = (updatedIncident) => {
+                if (updatedIncident && updatedIncident.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: incidentUpdated', updatedIncident);
+                    setIncidents(prevIncidents =>
+                        prevIncidents.map(inc => inc.id === updatedIncident.id ? updatedIncident : inc)
+                    );
+                }
+            };
+            const handleIncidentDeleted = (deletedData) => {
+                 if (deletedData && deletedData.organization_id === organization.id) {
+                    console.log('[PublicStatusPage] Socket event: incidentDeleted', deletedData);
+                    setIncidents(prevIncidents => prevIncidents.filter(inc => inc.id !== deletedData.id));
+                }
+            };
+
+            socket.on('serviceCreated', handleServiceCreated);
+            socket.on('serviceUpdated', handleServiceUpdated);
+            socket.on('serviceDeleted', handleServiceDeleted);
+            socket.on('incidentCreated', handleIncidentCreated);
+            socket.on('incidentUpdated', handleIncidentUpdated);
+            socket.on('incidentDeleted', handleIncidentDeleted);
+
+            return () => {
+                console.log(`[PublicStatusPage] Cleaning up socket listeners for org ID: ${organization.id}`);
+                socket.off('serviceCreated', handleServiceCreated);
+                socket.off('serviceUpdated', handleServiceUpdated);
+                socket.off('serviceDeleted', handleServiceDeleted);
+                socket.off('incidentCreated', handleIncidentCreated);
+                socket.off('incidentUpdated', handleIncidentUpdated);
+                socket.off('incidentDeleted', handleIncidentDeleted);
+            };
+        } else {
+             console.log('[PublicStatusPage] Socket not connected, or org data (with ID) not loaded. Listeners not set.');
+        }
+    }, [isConnected, socket, organization]);
+
 
     const activeIncidents = incidents.filter(inc => inc.status !== 'resolved' && inc.status !== 'completed');
     const resolvedIncidents = incidents.filter(inc => inc.status === 'resolved' || inc.status === 'completed').sort((a,b) => new Date(b.resolved_at || b.updated_at) - new Date(a.resolved_at || a.updated_at)).slice(0, 5);
@@ -113,7 +212,7 @@ function PublicStatusPage() {
 
     const currentOverallStatus = overallSystemStatus();
 
-    if (loading) {
+    if (loading && services.length === 0 && incidents.length === 0) {
         return (
             <Container maxWidth="md" sx={{ py: 4 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}>
@@ -124,7 +223,7 @@ function PublicStatusPage() {
         );
     }
 
-    if (error) {
+    if (error && services.length === 0 && incidents.length === 0) { 
         return (
             <Container maxWidth="md" sx={{ py: 4 }}>
                 <Alert severity="error" icon={<ErrorOutlineIcon fontSize="inherit" />}>
@@ -152,9 +251,12 @@ function PublicStatusPage() {
                 />
                 <Divider sx={{ my: 2 }}/>
                 <Typography variant="caption" color="text.secondary">
-                    Last updated: {new Date().toLocaleString()} (Note: This is client render time. Real-time updates via WebSockets would be ideal here.)
+                    Page loaded: {new Date().toLocaleString()}. Updates should appear in real-time.
                 </Typography>
             </Paper>
+
+            {loading && <Box sx={{textAlign: 'center', my: 2}}><CircularProgress size={24} /><Typography variant="caption" sx={{ml:1}}>Checking for updates...</Typography></Box>}
+            {error && !loading && <Alert severity="warning" sx={{mb: 2}}>Could not fetch initial data: {error}. Displaying cached or partial data if available.</Alert>}
 
             {activeIncidents.length > 0 && (
                 <Box mb={4}>
@@ -222,7 +324,7 @@ function PublicStatusPage() {
                     })}
                 </List>
             ) : (
-                <Typography>No services configured for this status page.</Typography>
+                 !loading && <Typography>No services configured for this status page.</Typography>
             )}
 
             {resolvedIncidents.length > 0 && (

@@ -45,7 +45,7 @@ const authenticateToken = async (req, res, next) => {
         if (err.name === 'TokenExpiredError') {
             return next(ApiError.unauthorized('Token expired.'));
         }
-        if (err.name === 'JsonWebTokenError') { 
+        if (err.name === 'JsonWebTokenError') { // Catches invalid signature, malformed token, etc.
             return next(ApiError.forbidden('Invalid token.'));
         }
         logger.error('[authenticateToken] Unexpected error during client token verification:', { message: err.message, stack: err.stack });

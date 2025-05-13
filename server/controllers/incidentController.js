@@ -1,7 +1,8 @@
+// status-page-app/server/controllers/incidentController.js
 const Incident = require('../models/Incident');
 const ApiError = require('../utils/ApiError');
+const httpStatus = require('http-status');
 const logger = require('../config/logger');
-const { pool } = require('../config/db'); // For direct DB access if needed for complex ops
 
 const incidentController = {
     async createIncident(req, res, next) {
@@ -11,52 +12,41 @@ const incidentController = {
             const organization_id = req.user.organizationId;
 
             if (!title || !description || !status) {
-                return next(ApiError.badRequest('Title, description, and status are required for an incident.'));
+                return next(new ApiError(httpStatus.BAD_REQUEST || 400, 'Title, description, and status are required for an incident.'));
             }
             if (!organization_id) {
-                return next(ApiError.badRequest('Organization context is missing.'));
+                return next(new ApiError(httpStatus.BAD_REQUEST || 400, 'Organization context is missing.'));
             }
 
-            const newIncident = await Incident.create({
-                title,
-                description,
-                status,
-                severity,
-                service_ids,
-                components_affected,
-                user_id,
-                organization_id,
-                scheduled_at
-            });
+            const newIncidentData = {
+                title, description, status, severity, service_ids, 
+                components_affected, user_id, organization_id, scheduled_at
+            };
+            const newIncidentWithDetails = await Incident.create(newIncidentData); 
             
             const io = req.app.get('socketio');
-            if (io && organization_id) {
-                io.to(`organization-${organization_id}`).emit('incidentCreated', newIncident);
-                // Also emit service status updates if services are affected and their status changes
-                if (service_ids && service_ids.length > 0) {
-                    // This logic might be more complex if an incident implies a specific status change for services
-                    // For now, just notifying about the incident.
-                }
+            if (io) {
+                const room = `organization-${organization_id}`;
+                const eventPayload = { ...newIncidentWithDetails, organization_id: organization_id };
+                io.to(room).emit('incidentCreated', eventPayload);
+                logger.info(`Socket event "incidentCreated" emitted to room ${room}`, { incidentId: newIncidentWithDetails.id, orgId: organization_id });
             }
             
-            res.status(201).json(newIncident);
+            res.status(httpStatus.CREATED || 201).json(newIncidentWithDetails);
         } catch (error) {
-            logger.error('Error creating incident:', { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to create incident.'));
+            logger.error('Error creating incident:', { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to create incident.'));
         }
     },
 
     async getIncidentsByOrganization(req, res, next) {
         try {
             const organization_id = req.user.organizationId;
-            if (!organization_id) {
-                return next(ApiError.badRequest('Organization context is missing.'));
-            }
             const incidents = await Incident.findAllByOrganizationId(organization_id);
             res.json(incidents);
         } catch (error) {
-            logger.error('Error fetching incidents by organization:', { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to fetch incidents.'));
+            logger.error('Error fetching incidents by organization:', { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to fetch incidents.'));
         }
     },
 
@@ -64,59 +54,50 @@ const incidentController = {
         try {
             const { incidentId } = req.params;
             const organization_id = req.user.organizationId;
-
-            const incident = await Incident.findById(incidentId);
+            const incident = await Incident.findById(incidentId, organization_id);
             if (!incident) {
-                return next(ApiError.notFound('Incident not found.'));
-            }
-            if (incident.organization_id !== organization_id) {
-                return next(ApiError.forbidden('You are not authorized to access this incident.'));
+                return next(new ApiError(httpStatus.NOT_FOUND || 404, 'Incident not found or not accessible.'));
             }
             res.json(incident);
         } catch (error) {
-            logger.error(`Error fetching incident by ID ${req.params.incidentId}:`, { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to fetch incident details.'));
+            logger.error(`Error fetching incident by ID ${req.params.incidentId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to fetch incident details.'));
         }
     },
 
     async updateIncident(req, res, next) {
         try {
             const { incidentId } = req.params;
-            const { title, description, status, severity, components_affected, service_ids, scheduled_at, resolved_at } = req.body;
+            const { title, description, status, severity, components_affected, service_ids, scheduled_at, resolved_at, update_description } = req.body;
             const organization_id = req.user.organizationId;
             const user_id_for_update = req.user.userId;
 
-
-            const incident = await Incident.findById(incidentId);
-            if (!incident) {
-                return next(ApiError.notFound('Incident not found.'));
-            }
-            if (incident.organization_id !== organization_id) {
-                return next(ApiError.forbidden('You are not authorized to update this incident.'));
+            const existingIncident = await Incident.findById(incidentId, organization_id);
+            if (!existingIncident) {
+                return next(new ApiError(httpStatus.NOT_FOUND || 404, 'Incident not found or not accessible.'));
             }
 
-            const updatedIncident = await Incident.update(incidentId, {
-                title,
-                description,
-                status,
-                severity,
-                components_affected,
-                service_ids,
-                user_id_for_update,
+            const updateData = {
+                title, description, status, severity, components_affected, service_ids,
+                user_id_for_update, 
+                update_log_description: update_description || `Incident details updated. New status: ${status || existingIncident.status}`,
                 scheduled_at,
-                resolved_at
-            });
+                resolved_at: (status === 'resolved' && !existingIncident.resolved_at) ? new Date() : (status !== 'resolved' ? null : existingIncident.resolved_at)
+            };
+            
+            const updatedIncidentWithDetails = await Incident.update(incidentId, updateData);
 
             const io = req.app.get('socketio');
-             if (io && organization_id) {
-                const fullUpdatedIncident = await Incident.findById(incidentId); // Fetch with all details for broadcast
-                io.to(`organization-${organization_id}`).emit('incidentUpdated', fullUpdatedIncident);
+             if (io) {
+                const room = `organization-${organization_id}`;
+                const eventPayload = { ...updatedIncidentWithDetails, organization_id: organization_id };
+                io.to(room).emit('incidentUpdated', eventPayload);
+                logger.info(`Socket event "incidentUpdated" emitted to room ${room}`, { incidentId: updatedIncidentWithDetails.id, orgId: organization_id });
             }
-
-            res.json(updatedIncident);
+            res.json(updatedIncidentWithDetails);
         } catch (error) {
-            logger.error(`Error updating incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to update incident.'));
+            logger.error(`Error updating incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to update incident.'));
         }
     },
     
@@ -127,31 +108,26 @@ const incidentController = {
             const user_id = req.user.userId;
             const organization_id = req.user.organizationId;
 
-            const incident = await Incident.findById(incidentId);
+            const incident = await Incident.findById(incidentId, organization_id);
             if (!incident) {
-                return next(ApiError.notFound('Incident not found.'));
-            }
-            if (incident.organization_id !== organization_id) {
-                return next(ApiError.forbidden('You are not authorized to update this incident.'));
+                return next(new ApiError(httpStatus.NOT_FOUND || 404, 'Incident not found or not accessible.'));
             }
 
-            const newUpdate = await Incident.addUpdate({
-                incident_id: incidentId,
-                user_id,
-                description,
-                status
+            const newUpdateAndIncident = await Incident.addUpdate({
+                incident_id: incidentId, user_id, description, status
             });
 
             const io = req.app.get('socketio');
-            if (io && organization_id) {
-                const fullIncidentWithUpdate = await Incident.findById(incidentId); // Fetch with all details for broadcast
-                io.to(`organization-${organization_id}`).emit('incidentUpdated', fullIncidentWithUpdate); // Or a more specific 'incidentUpdateAdded'
+            if (io) {
+                const room = `organization-${organization_id}`;
+                const eventPayload = { ...newUpdateAndIncident.incident, organization_id: organization_id };
+                io.to(room).emit('incidentUpdated', eventPayload); 
+                logger.info(`Socket event "incidentUpdated" (via addIncidentUpdate) emitted to room ${room}`, { incidentId, orgId: organization_id });
             }
-
-            res.status(201).json(newUpdate);
+            res.status(httpStatus.CREATED || 201).json(newUpdateAndIncident.update);
         } catch (error) {
-            logger.error(`Error adding update to incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to add incident update.'));
+            logger.error(`Error adding update to incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to add incident update.'));
         }
     },
 
@@ -160,25 +136,23 @@ const incidentController = {
             const { incidentId } = req.params;
             const organization_id = req.user.organizationId;
 
-            const incident = await Incident.findById(incidentId);
+            const incident = await Incident.findById(incidentId, organization_id);
             if (!incident) {
-                return next(ApiError.notFound('Incident not found.'));
-            }
-            if (incident.organization_id !== organization_id) {
-                return next(ApiError.forbidden('You are not authorized to delete this incident.'));
+                return next(new ApiError(httpStatus.NOT_FOUND || 404, 'Incident not found or not accessible.'));
             }
 
             await Incident.delete(incidentId);
             
             const io = req.app.get('socketio');
-            if (io && organization_id) {
-                io.to(`organization-${organization_id}`).emit('incidentDeleted', { id: incidentId, organization_id });
+            if (io) {
+                const room = `organization-${organization_id}`;
+                io.to(room).emit('incidentDeleted', { id: incidentId, organization_id: organization_id });
+                logger.info(`Socket event "incidentDeleted" emitted to room ${room}`, { incidentId, orgId: organization_id });
             }
-            
-            res.status(200).json({ message: 'Incident deleted successfully.' });
+            res.status(httpStatus.OK || 200).json({ message: 'Incident deleted successfully.' });
         } catch (error) {
-            logger.error(`Error deleting incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack });
-            next(ApiError.internalServerError('Failed to delete incident.'));
+            logger.error(`Error deleting incident ${req.params.incidentId}:`, { message: error.message, stack: error.stack, userId: req.user.userId });
+            next(new ApiError(httpStatus.INTERNAL_SERVER_ERROR || 500, 'Failed to delete incident.'));
         }
     }
 };

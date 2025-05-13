@@ -7,13 +7,13 @@ const organizationRoutes = require('./organizationRoutes');
 const teamRoutes = require('./teamRoutes');
 const serviceRoutes = require('./serviceRoutes');
 const incidentRoutes = require('./incidents'); 
-const userRoutes = require('./userRoutes'); // Ensure this line is present
+const userRoutes = require('./userRoutes');
 
 router.use('/auth', authRoutes);
 router.use('/organizations', organizationRoutes);
 router.use('/teams', teamRoutes);
 router.use('/services', serviceRoutes);
 router.use('/incidents', incidentRoutes);
-router.use('/users', userRoutes); // Ensure this line is present to mount the user routes
+router.use('/users', userRoutes);
 
 module.exports = router;

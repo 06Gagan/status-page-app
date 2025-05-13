@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }) => {
             console.log('[AuthContext] Profile fetched successfully:', response.data);
             setUser(response.data);
             setError(null);
-            if (token !== currentTokenForFetch) setToken(currentTokenForFetch); // Sync state if needed
+            if (token !== currentTokenForFetch) setToken(currentTokenForFetch); 
         } catch (err) {
             console.error("[AuthContext] Failed to fetch profile:", err.response?.data || err.message);
             handleNewToken(null); 
@@ -56,7 +56,7 @@ export const AuthProvider = ({ children }) => {
         } finally {
             setLoading(false);
         }
-    }, [handleNewToken, token]); // token is a dependency here to ensure consistency if it's used for comparison
+    }, [handleNewToken, token]);
 
     useEffect(() => {
         const initialToken = sessionStorage.getItem('token');
@@ -69,7 +69,7 @@ export const AuthProvider = ({ children }) => {
             setUser(null);
             setToken(null);
         }
-    }, [handleNewToken, fetchUserProfile]); // These are stable due to useCallback
+    }, [handleNewToken, fetchUserProfile]); 
 
     const login = async (credentials) => {
         setLoading(true); 

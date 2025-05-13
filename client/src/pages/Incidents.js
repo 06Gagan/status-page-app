@@ -1,3 +1,4 @@
+// status-page-app/client/src/pages/Incidents.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../config/api';
@@ -6,17 +7,16 @@ import {
     CircularProgress, Alert, Button, TextField, Dialog, DialogActions,
     DialogContent, DialogTitle, IconButton, Select, MenuItem,
     FormControl, InputLabel, Paper, Grid, Chip, Tooltip,
-    Accordion, AccordionSummary, AccordionDetails, Divider,
+    Accordion, AccordionSummary, AccordionDetails, Divider, // Added Divider back
     Checkbox, OutlinedInput
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles'; // Import useTheme
+import { useTheme } from '@mui/material/styles';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EditIcon from '@mui/icons-material/Edit';
-// import DeleteIcon from '@mui/icons-material/Delete'; // Was unused
+// import DeleteIcon from '@mui/icons-material/Delete'; // Keep if delete is implemented
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CommentIcon from '@mui/icons-material/Comment';
-import CircleIcon from '@mui/icons-material/Circle';
-// import ListItemIcon from '@mui/material/ListItemIcon'; // Was unused
+// import CircleIcon from '@mui/icons-material/Circle'; // Using Chip's internal or sx for color
 
 const incidentStatusOptions = [
     { value: 'investigating', label: 'Investigating', color: 'warning' },
@@ -33,7 +33,7 @@ const incidentSeverityOptions = [
     { value: 'low', label: 'Low', color: 'info' },
 ];
 
-const getStatusColor = (statusValue, type = 'status') => {
+const getStatusChipColor = (statusValue, type = 'status') => {
     const options = type === 'status' ? incidentStatusOptions : incidentSeverityOptions;
     const option = options.find(opt => opt.value === statusValue);
     return option ? option.color : 'default';
@@ -41,7 +41,7 @@ const getStatusColor = (statusValue, type = 'status') => {
 
 
 function Incidents() {
-    const theme = useTheme(); // Initialize theme
+    const theme = useTheme();
     const [incidents, setIncidents] = useState([]);
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -68,17 +68,18 @@ function Incidents() {
     const [isSubmittingUpdate, setIsSubmittingUpdate] = useState(false);
     const [updateDialogError, setUpdateDialogError] = useState('');
 
-
     const canManage = user?.role === 'admin' || user?.role === 'editor';
 
     const fetchIncidents = useCallback(async () => {
-        if (!token || !isAuthenticated) return;
+        if (!token || !isAuthenticated) {
+            if(!authLoading) setError("Not authenticated. Please log in.");
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError('');
         try {
-            const response = await api.get('/incidents', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get('/incidents');
             setIncidents(response.data || []);
         } catch (err) {
             console.error("Error fetching incidents:", err);
@@ -87,28 +88,22 @@ function Incidents() {
         } finally {
             setLoading(false);
         }
-    }, [token, isAuthenticated]);
+    }, [token, isAuthenticated, authLoading]);
 
     const fetchServicesForSelect = useCallback(async () => {
         if (!token || !isAuthenticated) return;
         try {
-            const response = await api.get('/services', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get('/services');
             setServices(response.data || []);
         } catch (err) {
             console.error("Error fetching services for select:", err);
         }
     }, [token, isAuthenticated]);
 
-
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
             fetchIncidents();
             fetchServicesForSelect();
-        } else if (!authLoading && !isAuthenticated) {
-            setError("Not authenticated. Please log in.");
-            setLoading(false);
         }
     }, [authLoading, isAuthenticated, fetchIncidents, fetchServicesForSelect]);
 
@@ -135,7 +130,7 @@ function Incidents() {
         setIsEditing(true);
         setCurrentIncident(incident);
         setIncidentTitle(incident.title);
-        setIncidentDescription(incident.description);
+        setIncidentDescription(incident.description || '');
         setIncidentStatus(incident.status);
         setIncidentSeverity(incident.severity);
         setComponentsAffected(Array.isArray(incident.components_affected) ? incident.components_affected.join(', ') : '');
@@ -157,36 +152,31 @@ function Incidents() {
             setDialogError('Incident title cannot be empty.');
             return;
         }
-        if (!incidentDescription.trim() && !isEditing) {
-            setDialogError('Initial description/update cannot be empty.');
+        if (!isEditing && !incidentDescription.trim()) { 
+            setDialogError('Initial description for the incident cannot be empty.');
             return;
         }
-
         setDialogError('');
         setIsSubmitting(true);
 
         const payload = {
             title: incidentTitle.trim(),
-            description: incidentDescription.trim(),
+            description: incidentDescription.trim(), 
             status: incidentStatus,
             severity: incidentSeverity,
             components_affected: componentsAffected.split(',').map(s => s.trim()).filter(s => s),
-            serviceIds: affectedServiceIds,
+            serviceIds: affectedServiceIds, 
             scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
             update_description: isEditing ? (incidentDescription.trim() || `Incident details updated. New status: ${incidentStatus}`) : undefined
         };
-
+        
         try {
             if (isEditing && currentIncident) {
-                await api.put(`/incidents/${currentIncident.id}`, payload, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.put(`/incidents/${currentIncident.id}`, payload);
             } else {
-                await api.post('/incidents', payload, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.post('/incidents', payload);
             }
-            fetchIncidents();
+            fetchIncidents(); 
             handleCloseCreateEditDialog();
         } catch (err) {
             console.error("Error submitting incident:", err);
@@ -199,7 +189,7 @@ function Incidents() {
     const handleOpenUpdateDialog = (incident) => {
         setIncidentForUpdate(incident);
         setUpdateDescription('');
-        setUpdateStatus(incident.status);
+        setUpdateStatus(incident.status); 
         setUpdateDialogError('');
         setIsSubmittingUpdate(false);
         setOpenUpdateDialog(true);
@@ -222,14 +212,12 @@ function Incidents() {
 
         const payload = {
             description: updateDescription.trim(),
-            status: updateStatus,
+            status: updateStatus, 
         };
 
         try {
-            await api.post(`/incidents/${incidentForUpdate.id}/updates`, payload, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            fetchIncidents();
+            await api.post(`/incidents/${incidentForUpdate.id}/updates`, payload);
+            fetchIncidents(); 
             handleCloseUpdateDialog();
         } catch (err) {
             console.error("Error submitting incident update:", err);
@@ -239,8 +227,7 @@ function Incidents() {
         }
     };
 
-
-    if (authLoading) {
+    if (authLoading && loading) {
         return <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress /></Box>;
     }
 
@@ -262,13 +249,13 @@ function Incidents() {
                     </Button>
                 )}
 
-                {loading && <CircularProgress />}
+                {loading && incidents.length === 0 && <CircularProgress />}
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {!loading && !error && incidents.length === 0 && isAuthenticated && (
+                {!loading && incidents.length === 0 && isAuthenticated && (
                     <Typography>No incidents found for your organization.</Typography>
                 )}
-                {!loading && !error && incidents.length > 0 && isAuthenticated && (
+                {incidents.length > 0 && isAuthenticated && (
                     incidents.map((incident) => (
                         <Paper key={incident.id} elevation={2} sx={{ mb: 2 }}>
                             <Accordion>
@@ -279,16 +266,15 @@ function Incidents() {
                                         </Grid>
                                         <Grid item xs={6} sm={3}>
                                             <Chip
-                                                icon={<CircleIcon sx={{ fontSize: 12 }} />}
                                                 label={incidentStatusOptions.find(s => s.value === incident.status)?.label || incident.status}
-                                                color={getStatusColor(incident.status, 'status')}
+                                                color={getStatusChipColor(incident.status, 'status')}
                                                 size="small"
                                             />
                                         </Grid>
                                         <Grid item xs={6} sm={2}>
                                             <Chip
                                                 label={incidentSeverityOptions.find(s => s.value === incident.severity)?.label || incident.severity}
-                                                color={getStatusColor(incident.severity, 'severity')}
+                                                color={getStatusChipColor(incident.severity, 'severity')}
                                                 size="small"
                                             />
                                         </Grid>
@@ -334,15 +320,14 @@ function Incidents() {
                                     {incident.updates && incident.updates.length > 0 ? (
                                         <List dense disablePadding>
                                             {incident.updates.sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).map(upd => (
-                                                <ListItem key={upd.id} sx={{ display: 'block', mb: 1, borderLeft: `3px solid ${theme.palette[getStatusColor(upd.status, 'status')]?.main || theme.palette.grey[400]}`, pl:1.5 }}>
+                                                <ListItem key={upd.id} sx={{ display: 'block', mb: 1, borderLeft: `3px solid ${theme.palette[getStatusChipColor(upd.status, 'status')]?.main || theme.palette.grey[400]}`, pl:1.5 }}>
                                                     <Typography variant="caption" color="text.secondary">
                                                         {new Date(upd.created_at).toLocaleString()}
                                                         {upd.username && ` by ${upd.username}`}
                                                         {' - Status: '}
                                                         <Chip
-                                                            icon={<CircleIcon sx={{ fontSize: 10 }} />}
                                                             label={incidentStatusOptions.find(s => s.value === upd.status)?.label || upd.status}
-                                                            color={getStatusColor(upd.status, 'status')}
+                                                            color={getStatusChipColor(upd.status, 'status')}
                                                             size="small"
                                                             sx={{height: 'auto', '.MuiChip-label': {fontSize: '0.7rem', lineHeight: '1.2'}}}
                                                         />
@@ -352,7 +337,7 @@ function Incidents() {
                                             ))}
                                         </List>
                                     ) : (
-                                        <Typography variant="body2" color="text.secondary">No updates posted yet.</Typography>
+                                        <Typography variant="body2" color="text.secondary">No updates posted yet for this incident.</Typography>
                                     )}
                                 </AccordionDetails>
                             </Accordion>
@@ -367,7 +352,7 @@ function Incidents() {
                     <DialogContent>
                         {dialogError && <Alert severity="error" sx={{ mb: 2 }}>{dialogError}</Alert>}
                         <TextField autoFocus margin="dense" id="incidentTitle" label="Incident Title" type="text" fullWidth variant="outlined" value={incidentTitle} onChange={(e) => setIncidentTitle(e.target.value)} disabled={isSubmitting} sx={{ mb: 2 }} />
-                        <TextField margin="dense" id="incidentDescription" label={isEditing ? "Update Description (optional)" : "Initial Description / Update"} type="text" fullWidth multiline rows={4} variant="outlined" value={incidentDescription} onChange={(e) => setIncidentDescription(e.target.value)} disabled={isSubmitting} sx={{ mb: 2 }} />
+                        <TextField margin="dense" id="incidentDescription" label={isEditing ? "Main Description (or for next update log)" : "Initial Description / Update"} type="text" fullWidth multiline rows={4} variant="outlined" value={incidentDescription} onChange={(e) => setIncidentDescription(e.target.value)} disabled={isSubmitting} sx={{ mb: 2 }} />
                         <Grid container spacing={2} sx={{ mb: 2 }}>
                             <Grid item xs={12} sm={6}>
                                 <FormControl fullWidth margin="dense" disabled={isSubmitting}>
@@ -445,7 +430,6 @@ function Incidents() {
                     </DialogActions>
                  </Dialog>
             )}
-
         </Container>
     );
 }

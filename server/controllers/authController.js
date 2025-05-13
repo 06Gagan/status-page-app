@@ -1,13 +1,12 @@
 // status-page-app/server/controllers/authController.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const Team = require('../models/Team'); // Ensure this model is correctly imported
-const Service = require('../models/Service'); // Ensure this model is correctly imported
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
-const DEBUG_FORCED_EXPIRES_IN = '8h';
+const DEBUG_FORCED_EXPIRES_IN = '8h'; 
 logger.info(`[authController] DEBUG: Forcing token expiration to: ${DEBUG_FORCED_EXPIRES_IN}`);
+
 
 exports.register = async (req, res, next) => {
     const { username, email, password, organizationName } = req.body;
@@ -113,7 +112,7 @@ exports.login = async (req, res, next) => {
         res.status(200).json({
             message: 'Login successful',
             token,
-            user: { // Send back the full userDetails needed by AuthContext
+            user: {
                 id: userDetails.id,
                 username: userDetails.username,
                 email: userDetails.email,
@@ -132,43 +131,33 @@ exports.login = async (req, res, next) => {
 exports.getProfile = async (req, res, next) => {
     try {
         const userId = req.user.userId; 
-        const user = await User.findById(userId); // This should fetch user with org name/slug
-
+        const user = await User.findById(userId); // Your User.findById should ideally join with Organizations to get name/slug
         if (!user) {
             return next(ApiError.notFound('User not found.'));
         }
-
-        // Fetch teams the user belongs to
-        const teams = await Team.findTeamsByUserId(userId);
-        
-        // Fetch all services for the user's organization
-        let services = [];
-        if (user.organization_id) {
-            services = await Service.findAllByOrganizationId(user.organization_id);
-        } else {
-            logger.warn(`User ${userId} has no organization_id in getProfile, services will be empty.`);
-        }
+        // These were from your original getProfile, ensure models support them
+        // const teams = await Team.findTeamsByUserId(userId); 
+        // const services = await Service.findAllByOrganizationId(user.organization_id);
 
         res.status(200).json({
-            // User details from User.findById (which should join with Organizations)
             id: user.id,
             username: user.username,
             email: user.email,
             organization_id: user.organization_id,
-            organization_name: user.organization_name, // Assuming User.findById includes this
-            organization_slug: user.organization_slug, // Assuming User.findById includes this
+            organization_name: user.organization_name, // Comes from User.findById joining Organizations
+            organization_slug: user.organization_slug, // Comes from User.findById joining Organizations
             role: user.role,
             created_at: user.created_at,
-            // Additional fetched data
-            teams: teams || [],
-            services: services || []
+            // teams: teams || [], // Add back if Team model is imported and findTeamsByUserId exists
+            // services: services || [] // Add back if Service model is imported and findAllByOrganizationId exists
         });
     } catch (error) {
-        logger.error(`Get profile error for user ${req.user?.userId}: ${error.message}`, { code: error.code, stack: error.stack });
-        next(ApiError.internalServerError('Error fetching profile data.'));
+        logger.error(`Get profile error: ${error.message}`, { code: error.code, stack: error.stack, userId: req.user?.userId });
+        next(ApiError.internalServerError('Error fetching profile.'));
     }
 };
 
+// updateProfile and updatePassword as previously provided (they were generally fine)
 exports.updateProfile = async (req, res, next) => {
     const userId = req.user.userId;
     const { username, email } = req.body;
@@ -180,15 +169,14 @@ exports.updateProfile = async (req, res, next) => {
         if (!updatedUser) {
             return next(ApiError.notFound('User not found or update failed.'));
         }
-        // Fetch the full user details again to send back consistent profile object
-        const userDetails = await User.findById(updatedUser.id); 
+        const userDetails = await User.findById(updatedUser.id);
         if (!userDetails) {
              logger.error(`Failed to fetch details for updated user ID: ${updatedUser.id}`);
             return next(ApiError.internalServerError('Profile update succeeded but failed to fetch updated user details.'));
         }
         res.status(200).json({
             message: 'Profile updated successfully.',
-            user: { // Send back the same structure as login/getProfile
+            user: {
                 id: userDetails.id,
                 username: userDetails.username,
                 email: userDetails.email,
@@ -217,10 +205,8 @@ exports.updatePassword = async (req, res, next) => {
         return next(ApiError.badRequest('New password must be at least 6 characters long.'));
     }
     try {
-        // req.user.email should be available from authenticateToken middleware
         const userForHash = await User.findByEmail(req.user.email); 
         if (!userForHash || !userForHash.password_hash) {
-            // This block might be redundant if findByEmail always returns hash or req.user.email is not set
             const userWithSensitiveData = await User.findByEmail(req.user.email); 
              if(!userWithSensitiveData || !userWithSensitiveData.password_hash) {
                 logger.error(`Could not retrieve password hash for user ${userId} during password update.`);

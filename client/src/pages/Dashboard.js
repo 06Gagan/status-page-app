@@ -1,85 +1,87 @@
+// status-page-app/client/src/pages/Dashboard.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { 
     Box, Typography, Grid, Paper, CircularProgress, Alert, Card, CardContent, Chip, Button 
 } from '@mui/material';
-import api from '../config/api';
+import api from '../config/api'; 
 import { useSocket } from '../contexts/SocketContext';
+import { useAuth } from '../contexts/AuthContext'; 
 import { Link as RouterLink } from 'react-router-dom';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 
 function Dashboard() {
+    const { isAuthenticated, loading: authLoading } = useAuth();
     const [summary, setSummary] = useState({ services: [], incidents: [] });
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true); 
     const [error, setError] = useState(null);
     const { socket, isConnected } = useSocket();
 
     const fetchData = useCallback(async () => {
+        if (authLoading || !isAuthenticated) { 
+            if (!isAuthenticated && !authLoading) setError("Not authenticated. Please log in.");
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const [servicesResponse, incidentsResponse] = await Promise.all([
-                api.get('/services').catch(e => { console.error("Service fetch error:", e); return null; }), 
-                api.get('/incidents').catch(e => { console.error("Incident fetch error:", e); return null; })
+                api.get('/services').catch(e => { console.error("Service fetch error:", e); return { data: [] }; }), 
+                api.get('/incidents').catch(e => { console.error("Incident fetch error:", e); return { data: [] }; })
             ]);
-
-            const fetchedServices = (servicesResponse && Array.isArray(servicesResponse.data)) ? servicesResponse.data : [];
-            const fetchedIncidents = (incidentsResponse && Array.isArray(incidentsResponse.data)) ? incidentsResponse.data : [];
             
             setSummary({
-                services: fetchedServices,
-                incidents: fetchedIncidents
+                services: servicesResponse.data || [],
+                incidents: incidentsResponse.data || []
             });
 
         } catch (err) { 
-            console.error("🔴 [Dashboard] Error in fetchData's Promise.all or subsequent logic:", err);
-            setError('Failed to fetch dashboard data. Please try again.');
+            console.error("🔴 [Dashboard] Error in fetchData:", err);
+            setError(err.response?.data?.message || 'Failed to fetch dashboard data. Please try again.');
             setSummary({ services: [], incidents: [] }); 
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [authLoading, isAuthenticated]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
 
     useEffect(() => {
-        if (isConnected && socket) {
+        if (isConnected && socket && isAuthenticated) { 
             const handleUpdate = (dataType, data) => {
-                console.log(`[Socket Dashboard] ${dataType} update:`, data);
+                console.log(`[Dashboard.js Socket] ${dataType} update:`, data);
                 fetchData(); 
             };
 
             socket.on('incidentCreated', (data) => handleUpdate('IncidentCreated', data));
             socket.on('incidentUpdated', (data) => handleUpdate('IncidentUpdated', data));
-            socket.on('incidentDeleted', () => fetchData()); 
-            socket.on('serviceStatusChanged', (data) => handleUpdate('ServiceStatusChanged', data));
+            socket.on('incidentDeleted', (data) => handleUpdate('IncidentDeleted', data));
             socket.on('serviceCreated', (data) => handleUpdate('ServiceCreated', data));
-            socket.on('serviceDeleted', () => fetchData());
+            socket.on('serviceUpdated', (data) => handleUpdate('ServiceUpdated', data));
+            socket.on('serviceDeleted', (data) => handleUpdate('ServiceDeleted', data));
             
             return () => {
                 if (socket) {
                     socket.off('incidentCreated');
                     socket.off('incidentUpdated');
                     socket.off('incidentDeleted');
-                    socket.off('serviceStatusChanged');
                     socket.off('serviceCreated');
+                    socket.off('serviceUpdated');
                     socket.off('serviceDeleted');
                 }
             };
-        } else {
-            // console.log('🟡 [Dashboard] Socket not connected, skipping event listeners');
         }
-    }, [isConnected, socket, fetchData]);
+    }, [isConnected, socket, fetchData, isAuthenticated]);
 
-    if (loading) {
+    if (authLoading || loading) {
         return <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>;
     }
 
     if (error) {
         return <Alert severity="error" sx={{ m: 3 }}>{error}</Alert>;
     }
-
     
     const { services: servicesArray, incidents: incidentsArray } = summary;
 

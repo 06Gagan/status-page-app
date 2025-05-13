@@ -1,3 +1,4 @@
+// status-page-app/client/src/pages/Services.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../config/api';
@@ -5,10 +6,10 @@ import {
     Container, Typography, Box, List, ListItem, ListItemText,
     CircularProgress, Alert, Button, TextField, Dialog, DialogActions,
     DialogContent, DialogContentText, DialogTitle, IconButton,
-    Select, MenuItem, FormControl, InputLabel, Paper,
-    Chip, Tooltip
+    Select, MenuItem, FormControl, InputLabel, Paper, // Added Paper
+    Chip, Tooltip, Divider // Added Divider
 } from '@mui/material';
-// import Grid from '@mui/material/Grid'; // Was unused
+// import Grid from '@mui/material/Grid'; // Removed unused Grid
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -47,18 +48,19 @@ function Services() {
     const [serviceToDelete, setServiceToDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
-
     const canManage = user?.role === 'admin' || user?.role === 'editor';
     const canDelete = user?.role === 'admin';
 
     const fetchServices = useCallback(async () => {
-        if (!token || !isAuthenticated) return;
+        if (!token || !isAuthenticated) {
+            if (!authLoading) setError("Not authenticated. Please log in.");
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError('');
         try {
-            const response = await api.get('/services', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get('/services');
             setServices(response.data || []);
         } catch (err) {
             console.error("Error fetching services:", err);
@@ -67,16 +69,14 @@ function Services() {
         } finally {
             setLoading(false);
         }
-    }, [token, isAuthenticated]);
+    }, [token, isAuthenticated, authLoading]);
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            fetchServices();
-        } else if (!authLoading && !isAuthenticated) {
-            setError("Not authenticated. Please log in.");
-            setLoading(false);
+            fetchServices(); // Corrected from fetchData
         }
-    }, [authLoading, isAuthenticated, fetchServices]);
+    }, [authLoading, isAuthenticated, fetchServices]); // Corrected from fetchData
+
 
     const handleOpenCreateDialog = () => {
         setIsEditing(false);
@@ -125,15 +125,11 @@ function Services() {
 
         try {
             if (isEditing && currentService) {
-                await api.put(`/services/${currentService.id}`, payload, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.put(`/services/${currentService.id}`, payload);
             } else {
-                await api.post('/services', payload, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
+                await api.post('/services', payload);
             }
-            fetchServices();
+            fetchServices(); 
             handleCloseCreateEditDialog();
         } catch (err) {
             console.error("Error submitting service:", err);
@@ -147,17 +143,16 @@ function Services() {
         if (!canManage) return;
         const originalServices = [...services];
         setServices(prevServices =>
-            prevServices.map(s => s.id === serviceId ? { ...s, status: newStatus } : s)
+            prevServices.map(s => s.id === serviceId ? { ...s, status: newStatus, updated_at: new Date().toISOString() } : s)
         );
 
         try {
-            await api.put(`/services/${serviceId}`, { status: newStatus }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            await api.put(`/services/${serviceId}`, { status: newStatus });
+            fetchServices(); 
         } catch (err) {
             console.error("Error updating service status:", err);
             setError(`Failed to update status for service ${serviceId}.`);
-            setServices(originalServices);
+            setServices(originalServices); 
         }
     };
 
@@ -176,10 +171,8 @@ function Services() {
         if (!serviceToDelete || !canDelete || isDeleting) return;
         setIsDeleting(true);
         try {
-            await api.delete(`/services/${serviceToDelete.id}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            fetchServices();
+            await api.delete(`/services/${serviceToDelete.id}`);
+            fetchServices(); 
             handleCloseDeleteDialog();
         } catch (err) {
             console.error("Error deleting service:", err);
@@ -189,7 +182,7 @@ function Services() {
         }
     };
 
-    if (authLoading) {
+    if (authLoading && loading) { 
         return <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress /></Box>;
     }
 
@@ -211,69 +204,72 @@ function Services() {
                     </Button>
                 )}
 
-                {loading && <CircularProgress />}
+                {loading && services.length === 0 && <CircularProgress />}
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-                {!loading && !error && services.length === 0 && isAuthenticated && (
+                {!loading && services.length === 0 && isAuthenticated && (
                     <Typography>No services found for your organization.</Typography>
                 )}
-                {!loading && !error && services.length > 0 && isAuthenticated && (
+                {services.length > 0 && isAuthenticated && ( 
                     <Paper elevation={2}>
                         <List>
-                            {services.map((service) => (
-                                <ListItem key={service.id} divider>
-                                    <ListItemText
-                                        primary={service.name}
-                                        secondary={
-                                            <>
-                                                <Typography component="span" variant="body2" color="text.primary">
-                                                    {service.description || "No description"}
-                                                </Typography>
-                                                <br />
-                                                <Chip
-                                                    icon={<CircleIcon sx={{ fontSize: 12 }} />}
-                                                    label={serviceStatusOptions.find(s => s.value === service.status)?.label || service.status}
-                                                    color={getStatusColor(service.status)}
-                                                    size="small"
-                                                    sx={{ mt: 0.5, mr: 1 }}
-                                                />
-                                                 Order: {service.order || 0}
-                                            </>
-                                        }
-                                    />
-                                    {canManage && (
-                                        <FormControl size="small" sx={{ m: 1, minWidth: 180, mr: 2 }} variant="outlined">
-                                            <InputLabel id={`status-select-label-${service.id}`}>Status</InputLabel>
-                                            <Select
-                                                labelId={`status-select-label-${service.id}`}
-                                                value={service.status}
-                                                label="Status"
-                                                onChange={(e) => handleStatusChange(service.id, e.target.value)}
-                                            >
-                                                {serviceStatusOptions.map(option => (
-                                                    <MenuItem key={option.value} value={option.value}>
-                                                        <CircleIcon sx={{ fontSize: 12, mr: 1, color: `${option.color}.main` }} />
-                                                        {option.label}
-                                                    </MenuItem>
-                                                ))}
-                                            </Select>
-                                        </FormControl>
-                                    )}
-                                    {canManage && (
-                                        <Tooltip title="Edit Service">
-                                            <IconButton edge="end" aria-label="edit" onClick={() => handleOpenEditDialog(service)} sx={{mr:1}}>
-                                                <EditIcon />
-                                            </IconButton>
-                                        </Tooltip>
-                                    )}
-                                    {canDelete && (
-                                         <Tooltip title="Delete Service">
-                                            <IconButton edge="end" aria-label="delete" onClick={() => handleOpenDeleteDialog(service)}>
-                                                <DeleteIcon />
-                                            </IconButton>
-                                        </Tooltip>
-                                    )}
-                                </ListItem>
+                            {services.map((service, index) => (
+                                <React.Fragment key={service.id}>
+                                    <ListItem>
+                                        <ListItemText
+                                            primary={service.name}
+                                            secondary={
+                                                <>
+                                                    <Typography component="span" variant="body2" color="text.primary">
+                                                        {service.description || "No description"}
+                                                    </Typography>
+                                                    <br />
+                                                    <Chip
+                                                        icon={<CircleIcon sx={{ fontSize: 12 }} />}
+                                                        label={serviceStatusOptions.find(s => s.value === service.status)?.label || service.status}
+                                                        color={getStatusColor(service.status)}
+                                                        size="small"
+                                                        sx={{ mt: 0.5, mr: 1 }}
+                                                    />
+                                                    Order: {service.order || 0}
+                                                </>
+                                            }
+                                        />
+                                        {canManage && (
+                                            <FormControl size="small" sx={{ m: 1, minWidth: 180, mr: 2 }} variant="outlined">
+                                                <InputLabel id={`status-select-label-${service.id}`}>Status</InputLabel>
+                                                <Select
+                                                    labelId={`status-select-label-${service.id}`}
+                                                    value={service.status}
+                                                    label="Status"
+                                                    onChange={(e) => handleStatusChange(service.id, e.target.value)}
+                                                >
+                                                    {serviceStatusOptions.map(option => (
+                                                        <MenuItem key={option.value} value={option.value}>
+                                                            <CircleIcon sx={{ fontSize: 12, mr: 1, color: `${option.color}.main` }} />
+                                                            {option.label}
+                                                        </MenuItem>
+                                                    ))}
+                                                </Select>
+                                            </FormControl>
+                                        )}
+                                        {canManage && (
+                                            <Tooltip title="Edit Service">
+                                                <IconButton edge="end" aria-label="edit" onClick={() => handleOpenEditDialog(service)} sx={{mr:1}}>
+                                                    <EditIcon />
+                                                </IconButton>
+                                            </Tooltip>
+                                        )}
+                                        {canDelete && (
+                                            <Tooltip title="Delete Service">
+                                                <IconButton edge="end" aria-label="delete" onClick={() => handleOpenDeleteDialog(service)}>
+                                                    <DeleteIcon />
+                                                </IconButton>
+                                            </Tooltip>
+                                        )}
+                                    </ListItem>
+                                    {index < services.length - 1 && <Divider />}
+                                </React.Fragment>
                             ))}
                         </List>
                     </Paper>
@@ -365,7 +361,6 @@ function Services() {
                     </DialogActions>
                  </Dialog>
             )}
-
         </Container>
     );
 }
