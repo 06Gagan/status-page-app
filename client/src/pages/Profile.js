@@ -5,14 +5,13 @@ import api from '../config/api';
 import {
     Container, Box, Typography, TextField, Button,
     CircularProgress, Alert, Grid, Paper, List, ListItem,
-    ListItemText, Divider, Link as MuiLink
+    ListItemText, Divider, Link
 } from '@mui/material';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'; // <<< IMPORT ADDED HERE
-import { Link as RouterLink } from 'react-router-dom'; // Removed unused useNavigate
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import { Link as RouterLink } from 'react-router-dom';
 
 function Profile() {
-    const { user, token, loading: authLoading, updateProfileContext /*, refreshProfile */ } = useAuth(); // refreshProfile commented out if not used
-    // const navigate = useNavigate(); // Commented out if not used
+    const { user, token, loading: authLoading, updateProfileContext } = useAuth();
 
     const [profileData, setProfileData] = useState(null);
     const [name, setName] = useState('');
@@ -29,37 +28,39 @@ function Profile() {
     const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
     const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-    const fetchProfileData = useCallback(async () => {
+    const fetchFullProfileData = useCallback(async () => {
         if (!token) {
             setLoadingProfile(false);
             return;
         }
         setLoadingProfile(true);
+        setUpdateError(''); 
         try {
-            const response = await api.get('/auth/profile', {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            const response = await api.get('/auth/profile');
             setProfileData(response.data);
             setName(response.data.username || '');
             setEmail(response.data.email || '');
         } catch (error) {
-            console.error("Error fetching profile data:", error);
-            setUpdateError("Failed to load profile data.");
+            console.error("Error fetching full profile data:", error);
+            setUpdateError(error.response?.data?.message || "Failed to load profile data.");
         } finally {
             setLoadingProfile(false);
         }
     }, [token]);
 
     useEffect(() => {
-        if (!authLoading && user) { 
-            setName(user.username || '');
-            setEmail(user.email || '');
-            fetchProfileData();
-        } else if (!authLoading && !user) {
-            setUpdateError("Not authenticated.");
-            setLoadingProfile(false);
+        if (!authLoading) { // Wait for auth context to finish initial loading
+            if (user && token) { // Check if user and token are available
+                // Set initial form values from context if available, then fetch full profile
+                setName(user.username || '');
+                setEmail(user.email || '');
+                fetchFullProfileData(); 
+            } else {
+                setUpdateError("Not authenticated. Please log in.");
+                setLoadingProfile(false);
+            }
         }
-    }, [user, authLoading, fetchProfileData]);
+    }, [user, token, authLoading, fetchFullProfileData]);
 
 
     const handleProfileUpdate = async (e) => {
@@ -68,7 +69,13 @@ function Profile() {
         setUpdateSuccess('');
         setIsUpdatingProfile(true);
         try {
-            await updateProfileContext({ username: name, email });
+            const updatedUserData = await updateProfileContext({ username: name, email });
+            // updateProfileContext should update the global user state.
+            // We can also update local form fields if the returned object is consistent.
+            if (updatedUserData) {
+                setName(updatedUserData.username || name);
+                setEmail(updatedUserData.email || email);
+            }
             setUpdateSuccess('Profile updated successfully!');
         } catch (err) {
             setUpdateError(err.message || 'Failed to update profile.');
@@ -92,8 +99,7 @@ function Profile() {
         setIsUpdatingPassword(true);
         try {
             await api.put('/auth/profile/password', 
-                { currentPassword, newPassword },
-                { headers: { Authorization: `Bearer ${token}` } }
+                { currentPassword, newPassword }
             );
             setPasswordSuccess('Password updated successfully!');
             setCurrentPassword('');
@@ -116,10 +122,10 @@ function Profile() {
         );
     }
 
-    if (!user && !authLoading) { 
+    if (!profileData && !loadingProfile) { 
         return (
             <Container>
-                <Alert severity="error">You are not logged in. Please <MuiLink component={RouterLink} to="/login">login</MuiLink> to view your profile.</Alert>
+                <Alert severity="error">{updateError || "Could not load profile. Please try again."}</Alert>
             </Container>
         );
     }
@@ -131,7 +137,7 @@ function Profile() {
                 <Grid item xs={12} md={7}>
                     <Paper sx={{ p: 3 }}>
                         <Typography variant="h6" gutterBottom>Profile Information</Typography>
-                        {updateError && <Alert severity="error" sx={{ mb: 2 }}>{updateError}</Alert>}
+                        {updateError && !updateSuccess && <Alert severity="error" sx={{ mb: 2 }}>{updateError}</Alert>}
                         {updateSuccess && <Alert severity="success" sx={{ mb: 2 }}>{updateSuccess}</Alert>}
                         <Box component="form" onSubmit={handleProfileUpdate} noValidate>
                             <TextField

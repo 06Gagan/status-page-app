@@ -17,6 +17,15 @@ const Team = {
         return result.rows[0];
     },
 
+    // New method to find a team by name within a specific organization
+    async findByNameAndOrg(name, organization_id, client = null) {
+        const db = client || pool;
+        const query = 'SELECT * FROM Teams WHERE name = $1 AND organization_id = $2';
+        const values = [name, organization_id];
+        const result = await db.query(query, values);
+        return result.rows[0];
+    },
+
     async findAllByOrganizationId(organization_id, client = null) {
         const db = client || pool;
         const query = 'SELECT * FROM Teams WHERE organization_id = $1 ORDER BY name';
@@ -41,17 +50,11 @@ const Team = {
 
     async addMember(team_id, user_id, role = 'member', client = null) { 
         const db = client || pool;
-        const query = 'INSERT INTO TeamMembers (team_id, user_id, role) VALUES ($1, $2, $3) RETURNING *';
+        // Use ON CONFLICT DO NOTHING to prevent error if member already exists
+        const query = 'INSERT INTO TeamMembers (team_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT (team_id, user_id) DO NOTHING RETURNING *';
         const values = [team_id, user_id, role];
-        try {
-            const result = await db.query(query, values);
-            return result.rows[0];
-        } catch (error) {
-            if (error.code === '23505') { 
-                throw new Error('User is already a member of this team.');
-            }
-            throw error;
-        }
+        const result = await db.query(query, values);
+        return result.rows[0]; // Will be undefined if conflict and nothing inserted
     },
 
     async removeMember(team_id, user_id, client = null) {
