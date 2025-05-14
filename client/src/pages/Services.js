@@ -3,14 +3,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../config/api';
 import {
-    Container, Typography, Box, List, ListItem, ListItemText,
-    CircularProgress, Alert, Button, TextField, Dialog, DialogActions,
+    Typography, Box, CircularProgress, Alert, Button, TextField, Dialog, DialogActions,
     DialogContent, DialogContentText, DialogTitle, IconButton,
-    Select, MenuItem, FormControl, InputLabel, Paper, // Added Paper
-    Chip, Tooltip, Divider // Added Divider
+    Select, MenuItem, FormControl, InputLabel,
+    Chip, Tooltip, useTheme, Card, CardContent, Grid 
 } from '@mui/material';
-// import Grid from '@mui/material/Grid'; // Removed unused Grid
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CircleIcon from '@mui/icons-material/Circle';
@@ -33,6 +31,7 @@ function Services() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const { token, user, isAuthenticated, loading: authLoading } = useAuth();
+    const theme = useTheme();
 
     const [openCreateEditDialog, setOpenCreateEditDialog] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -73,9 +72,9 @@ function Services() {
 
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            fetchServices(); // Corrected from fetchData
+            fetchServices();
         }
-    }, [authLoading, isAuthenticated, fetchServices]); // Corrected from fetchData
+    }, [authLoading, isAuthenticated, fetchServices]);
 
 
     const handleOpenCreateDialog = () => {
@@ -183,185 +182,278 @@ function Services() {
     };
 
     if (authLoading && loading) { 
-        return <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress /></Box>;
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+                <CircularProgress />
+            </Box>
+        );
     }
 
     return (
-        <Container maxWidth="lg">
-            <Box sx={{ my: 4 }}>
-                <Typography variant="h4" component="h1" gutterBottom>
-                    Manage Services
-                </Typography>
+        <Box>
+            <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                    <Typography variant="h4" fontWeight={600} gutterBottom>
+                        Services
+                    </Typography>
+                    <Typography variant="body1" color="text.secondary">
+                        Manage and monitor your service components
+                    </Typography>
+                </Box>
 
                 {canManage && (
                     <Button
                         variant="contained"
-                        startIcon={<AddCircleOutlineIcon />}
+                        startIcon={<AddIcon />}
                         onClick={handleOpenCreateDialog}
-                        sx={{ mb: 2 }}
+                        sx={{ height: 'fit-content' }}
                     >
-                        Create New Service
+                        Add Service
                     </Button>
-                )}
-
-                {loading && services.length === 0 && <CircularProgress />}
-                {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-                {!loading && services.length === 0 && isAuthenticated && (
-                    <Typography>No services found for your organization.</Typography>
-                )}
-                {services.length > 0 && isAuthenticated && ( 
-                    <Paper elevation={2}>
-                        <List>
-                            {services.map((service, index) => (
-                                <React.Fragment key={service.id}>
-                                    <ListItem>
-                                        <ListItemText
-                                            primary={service.name}
-                                            secondary={
-                                                <>
-                                                    <Typography component="span" variant="body2" color="text.primary">
-                                                        {service.description || "No description"}
-                                                    </Typography>
-                                                    <br />
-                                                    <Chip
-                                                        icon={<CircleIcon sx={{ fontSize: 12 }} />}
-                                                        label={serviceStatusOptions.find(s => s.value === service.status)?.label || service.status}
-                                                        color={getStatusColor(service.status)}
-                                                        size="small"
-                                                        sx={{ mt: 0.5, mr: 1 }}
-                                                    />
-                                                    Order: {service.order || 0}
-                                                </>
-                                            }
-                                        />
-                                        {canManage && (
-                                            <FormControl size="small" sx={{ m: 1, minWidth: 180, mr: 2 }} variant="outlined">
-                                                <InputLabel id={`status-select-label-${service.id}`}>Status</InputLabel>
-                                                <Select
-                                                    labelId={`status-select-label-${service.id}`}
-                                                    value={service.status}
-                                                    label="Status"
-                                                    onChange={(e) => handleStatusChange(service.id, e.target.value)}
-                                                >
-                                                    {serviceStatusOptions.map(option => (
-                                                        <MenuItem key={option.value} value={option.value}>
-                                                            <CircleIcon sx={{ fontSize: 12, mr: 1, color: `${option.color}.main` }} />
-                                                            {option.label}
-                                                        </MenuItem>
-                                                    ))}
-                                                </Select>
-                                            </FormControl>
-                                        )}
-                                        {canManage && (
-                                            <Tooltip title="Edit Service">
-                                                <IconButton edge="end" aria-label="edit" onClick={() => handleOpenEditDialog(service)} sx={{mr:1}}>
-                                                    <EditIcon />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                        {canDelete && (
-                                            <Tooltip title="Delete Service">
-                                                <IconButton edge="end" aria-label="delete" onClick={() => handleOpenDeleteDialog(service)}>
-                                                    <DeleteIcon />
-                                                </IconButton>
-                                            </Tooltip>
-                                        )}
-                                    </ListItem>
-                                    {index < services.length - 1 && <Divider />}
-                                </React.Fragment>
-                            ))}
-                        </List>
-                    </Paper>
                 )}
             </Box>
 
-            {canManage && (
-                <Dialog open={openCreateEditDialog} onClose={handleCloseCreateEditDialog} maxWidth="sm" fullWidth>
-                    <DialogTitle>{isEditing ? 'Edit Service' : 'Create New Service'}</DialogTitle>
-                    <DialogContent>
-                        {dialogError && <Alert severity="error" sx={{ mb: 2 }}>{dialogError}</Alert>}
-                        <TextField
-                            autoFocus
-                            margin="dense"
-                            id="serviceName"
-                            label="Service Name"
-                            type="text"
-                            fullWidth
-                            variant="outlined"
-                            value={serviceName}
-                            onChange={(e) => setServiceName(e.target.value)}
-                            disabled={isSubmitting}
-                            sx={{ mb: 2 }}
-                        />
-                        <TextField
-                            margin="dense"
-                            id="serviceDescription"
-                            label="Description (Optional)"
-                            type="text"
-                            fullWidth
-                            multiline
-                            rows={3}
-                            variant="outlined"
-                            value={serviceDescription}
-                            onChange={(e) => setServiceDescription(e.target.value)}
-                            disabled={isSubmitting}
-                            sx={{ mb: 2 }}
-                        />
-                        <FormControl fullWidth margin="dense" sx={{ mb: 2 }} disabled={isSubmitting}>
-                            <InputLabel id="service-status-label">Status</InputLabel>
-                            <Select
-                                labelId="service-status-label"
-                                id="serviceStatus"
-                                value={serviceStatus}
-                                label="Status"
-                                onChange={(e) => setServiceStatus(e.target.value)}
-                            >
-                                {serviceStatusOptions.map(option => (
-                                    <MenuItem key={option.value} value={option.value}>
-                                        {option.label}
-                                    </MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                        <TextField
-                            margin="dense"
-                            id="serviceOrder"
-                            label="Display Order (Optional, e.g., 0, 1, 2)"
-                            type="number"
-                            fullWidth
-                            variant="outlined"
-                            value={serviceOrder}
-                            onChange={(e) => setServiceOrder(e.target.value)}
-                            disabled={isSubmitting}
-                        />
-                    </DialogContent>
-                    <DialogActions>
-                        <Button onClick={handleCloseCreateEditDialog} disabled={isSubmitting}>Cancel</Button>
-                        <Button onClick={handleSubmitService} disabled={isSubmitting} variant="contained">
-                            {isSubmitting ? <CircularProgress size={24} /> : (isEditing ? 'Save Changes' : 'Create Service')}
-                        </Button>
-                    </DialogActions>
-                </Dialog>
+            {error && (
+                <Alert 
+                    severity="error" 
+                    sx={{ mb: 3, borderRadius: 2 }}
+                >
+                    {error}
+                </Alert>
             )}
 
-            {canDelete && serviceToDelete && (
-                 <Dialog open={openDeleteDialog} onClose={handleCloseDeleteDialog} maxWidth="xs" fullWidth>
-                    <DialogTitle>Confirm Delete</DialogTitle>
-                    <DialogContent>
-                        <DialogContentText>
-                            Are you sure you want to delete the service: <strong>{serviceToDelete.name}</strong>? This action cannot be undone.
-                        </DialogContentText>
-                    </DialogContent>
-                    <DialogActions>
-                        <Button onClick={handleCloseDeleteDialog} disabled={isDeleting}>Cancel</Button>
-                        <Button onClick={handleDeleteService} disabled={isDeleting} color="error" variant="contained">
-                             {isDeleting ? <CircularProgress size={24} /> : "Delete"}
+            {!loading && services.length === 0 && isAuthenticated && (
+                <Card elevation={0} sx={{ p: 4, textAlign: 'center', bgcolor: theme.palette.background.default }}>
+                    <Typography variant="h6" gutterBottom>No services found</Typography>
+                    <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                        Add your first service to start monitoring its status
+                    </Typography>
+                    {canManage && (
+                        <Button
+                            variant="contained"
+                            startIcon={<AddIcon />}
+                            onClick={handleOpenCreateDialog}
+                        >
+                            Create Service
                         </Button>
-                    </DialogActions>
-                 </Dialog>
+                    )}
+                </Card>
             )}
-        </Container>
+
+            {services.length > 0 && isAuthenticated && (
+                <Grid container spacing={2}>
+                    {services.map((service) => (
+                        <Grid item xs={12} key={service.id}>
+                            <Card elevation={0}>
+                                <CardContent sx={{ p: 3 }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <Box>
+                                            <Typography variant="h6" fontWeight={500}>
+                                                {service.name}
+                                            </Typography>
+                                            {service.description && (
+                                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                                    {service.description}
+                                                </Typography>
+                                            )}
+                                            <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                                <Chip
+                                                    icon={<CircleIcon sx={{ fontSize: 12 }} />}
+                                                    label={serviceStatusOptions.find(s => s.value === service.status)?.label || service.status}
+                                                    color={getStatusColor(service.status)}
+                                                    size="small"
+                                                    sx={{ textTransform: 'capitalize' }}
+                                                />
+                                                <Typography variant="body2" color="text.secondary">
+                                                    Order: {service.order || 0}
+                                                </Typography>
+                                            </Box>
+                                        </Box>
+                                        
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                            {canManage && (
+                                                <FormControl size="small" sx={{ minWidth: 180 }} variant="outlined">
+                                                    <InputLabel id={`status-select-label-${service.id}`}>Status</InputLabel>
+                                                    <Select
+                                                        labelId={`status-select-label-${service.id}`}
+                                                        value={service.status}
+                                                        label="Status"
+                                                        onChange={(e) => handleStatusChange(service.id, e.target.value)}
+                                                    >
+                                                        {serviceStatusOptions.map(option => (
+                                                            <MenuItem key={option.value} value={option.value}>
+                                                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                                                    <CircleIcon sx={{ fontSize: 12, mr: 1, color: `${option.color}.main` }} />
+                                                                    {option.label}
+                                                                </Box>
+                                                            </MenuItem>
+                                                        ))}
+                                                    </Select>
+                                                </FormControl>
+                                            )}
+                                            
+                                            {canManage && (
+                                                <Tooltip title="Edit service">
+                                                    <IconButton 
+                                                        onClick={() => handleOpenEditDialog(service)}
+                                                        size="small"
+                                                        sx={{ color: theme.palette.primary.main }}
+                                                    >
+                                                        <EditIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            )}
+                                            
+                                            {canDelete && (
+                                                <Tooltip title="Delete service">
+                                                    <IconButton 
+                                                        onClick={() => handleOpenDeleteDialog(service)}
+                                                        size="small"
+                                                        sx={{ color: theme.palette.error.main }}
+                                                    >
+                                                        <DeleteIcon fontSize="small" />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            )}
+                                        </Box>
+                                    </Box>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+                    ))}
+                </Grid>
+            )}
+
+            {/* Create/Edit Dialog */}
+            <Dialog
+                open={openCreateEditDialog}
+                onClose={handleCloseCreateEditDialog}
+                maxWidth="sm"
+                fullWidth
+                PaperProps={{
+                    elevation: 2,
+                    sx: { borderRadius: 3 }
+                }}
+            >
+                <DialogTitle>
+                    {isEditing ? 'Edit Service' : 'Create New Service'}
+                </DialogTitle>
+                <DialogContent>
+                    {dialogError && (
+                        <Alert severity="error" sx={{ mb: 2 }}>
+                            {dialogError}
+                        </Alert>
+                    )}
+                    <TextField
+                        autoFocus
+                        margin="dense"
+                        label="Service Name"
+                        type="text"
+                        fullWidth
+                        variant="outlined"
+                        value={serviceName}
+                        onChange={(e) => setServiceName(e.target.value)}
+                        required
+                        sx={{ mb: 2 }}
+                    />
+                    <TextField
+                        margin="dense"
+                        label="Description (optional)"
+                        type="text"
+                        fullWidth
+                        variant="outlined"
+                        value={serviceDescription}
+                        onChange={(e) => setServiceDescription(e.target.value)}
+                        multiline
+                        rows={2}
+                        sx={{ mb: 2 }}
+                    />
+                    <FormControl fullWidth variant="outlined" margin="dense" sx={{ mb: 2 }}>
+                        <InputLabel id="service-status-label">Status</InputLabel>
+                        <Select
+                            labelId="service-status-label"
+                            value={serviceStatus}
+                            onChange={(e) => setServiceStatus(e.target.value)}
+                            label="Status"
+                        >
+                            {serviceStatusOptions.map(option => (
+                                <MenuItem key={option.value} value={option.value}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                        <CircleIcon sx={{ fontSize: 12, mr: 1, color: `${option.color}.main` }} />
+                                        {option.label}
+                                    </Box>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    <TextField
+                        margin="dense"
+                        label="Display Order"
+                        type="number"
+                        fullWidth
+                        variant="outlined"
+                        value={serviceOrder}
+                        onChange={(e) => setServiceOrder(e.target.value)}
+                        helperText="Lower numbers appear first (0 is first)"
+                    />
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 3 }}>
+                    <Button 
+                        onClick={handleCloseCreateEditDialog} 
+                        color="inherit"
+                        disabled={isSubmitting}
+                    >
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={handleSubmitService} 
+                        variant="contained"
+                        disabled={isSubmitting || !serviceName.trim()}
+                    >
+                        {isSubmitting ? 'Saving...' : (isEditing ? 'Update' : 'Create')}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog
+                open={openDeleteDialog}
+                onClose={handleCloseDeleteDialog}
+                maxWidth="xs"
+                fullWidth
+                PaperProps={{
+                    elevation: 2,
+                    sx: { borderRadius: 3 }
+                }}
+            >
+                <DialogTitle>
+                    Confirm Deletion
+                </DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Are you sure you want to delete the service <strong>{serviceToDelete?.name}</strong>?
+                        This action cannot be undone.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions sx={{ px: 3, pb: 3 }}>
+                    <Button 
+                        onClick={handleCloseDeleteDialog} 
+                        color="inherit"
+                        disabled={isDeleting}
+                    >
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={handleDeleteService} 
+                        color="error"
+                        variant="contained"
+                        disabled={isDeleting}
+                    >
+                        {isDeleting ? 'Deleting...' : 'Delete'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+        </Box>
     );
 }
 
