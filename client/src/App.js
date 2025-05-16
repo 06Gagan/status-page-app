@@ -1,4 +1,4 @@
-// status-page-app/client/src/App.js
+console.log('My Frontend API Base URL is:', process.env.REACT_APP_API_BASE_URL);
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
