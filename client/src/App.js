@@ -1,4 +1,3 @@
-console.log('My Frontend API Base URL is:', process.env.REACT_APP_API_BASE_URL);
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -17,6 +16,8 @@ const Teams = lazy(() => import('./pages/Teams'));
 const Profile = lazy(() => import('./pages/Profile'));
 const PublicStatusPage = lazy(() => import('./pages/PublicStatus'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+
+console.log('My Frontend API Base URL is:', process.env.REACT_APP_API_BASE_URL);
 
 const RootRedirect = () => {
   const { isAuthenticated, loading } = useAuth();
