@@ -19,10 +19,15 @@ const User = require('./models/User');
 const app = express();
 const server = http.createServer(app); 
 
+// Configure allowed origins
+const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ["http://localhost:3000"];
+logger.info(`Allowed CORS origins: ${allowedOrigins.join(', ')}`);
+
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
-        methods: ["GET", "POST"]
+        origin: allowedOrigins,
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
@@ -32,12 +37,12 @@ io.use(async (socket, next) => {
     if (token) {
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const user = await User.findById(decoded.userId); // Ensure your User model can fetch by ID
+            const user = await User.findById(decoded.userId);
             if (!user || !user.organization_id) {
                 logger.warn(`Socket Auth: User not found or no organization_id for token UID ${decoded.userId}`);
                 return next(new Error('Authentication error: User not found or invalid.'));
             }
-            socket.user = { // Attach user info to the socket for authenticated users
+            socket.user = {
                 id: user.id,
                 organizationId: user.organization_id,
                 role: user.role
@@ -45,16 +50,13 @@ io.use(async (socket, next) => {
             logger.info(`Socket authenticated for user ${user.id}, org ${user.organization_id}`);
             next();
         } catch (err) {
-            logger.error('Socket authentication error (token present but invalid):', { message: err.message });
-            // If token is present but invalid, we might still let them connect as an unauthenticated user
-            // or explicitly deny. For now, let's treat as unauthenticated.
-            // If strict auth is needed for ALL socket actions, then: return next(new Error('Authentication error: Invalid token.'));
+            logger.error('Socket authentication error:', { message: err.message });
             logger.warn('Socket connection with invalid token, proceeding as unauthenticated.');
-            next(); // Allow connection but socket.user will not be set
+            next();
         }
     } else {
         logger.info('Socket connection attempt without token (public viewer).');
-        next(); // Allow unauthenticated connection
+        next();
     }
 });
 
@@ -62,13 +64,11 @@ io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
 
     if (socket.user && socket.user.organizationId) {
-        // Authenticated user joins their specific organization room
         const roomName = `organization-${socket.user.organizationId}`;
         socket.join(roomName);
         logger.info(`Socket ${socket.id} (User ${socket.user.id}) joined room: ${roomName}`);
     }
 
-    // Handler for public pages to join a room based on org ID
     socket.on('joinPublicRoom', (orgId) => {
         if (orgId) {
             const roomName = `organization-${orgId}`;
@@ -83,20 +83,31 @@ io.on('connection', (socket) => {
         logger.info(`Socket disconnected: ${socket.id}. Reason: ${reason}`);
     });
 });
-app.set('socketio', io); 
 
+app.set('socketio', io); 
 app.set('trust proxy', 1); 
 
+// CORS configuration
 const corsOptions = {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
-    optionsSuccessStatus: 200
+    origin: allowedOrigins,
+    optionsSuccessStatus: 200,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 };
-app.use(cors(corsOptions));
-app.use(helmet()); 
 
+app.use(cors(corsOptions));
+
+// Security middleware
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+})); 
+
+// Rate limiting
 const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: process.env.NODE_ENV === 'development' ? 10000 : 100, // Increased for dev 
+    windowMs: 15 * 60 * 1000,
+    max: process.env.NODE_ENV === 'development' ? 10000 : 100,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -104,23 +115,29 @@ const apiLimiter = rateLimit({
         message: 'Too many requests from this IP, please try again after 15 minutes.'
     },
 });
+
 app.use('/api/v1/', apiLimiter); 
 
+// Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Logging middleware
 if (process.env.NODE_ENV === 'development') {
     app.use(morgan('dev'));
 } else {
     app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 }
 
+// Routes
 app.use('/api/v1', allRoutes); 
 
+// 404 handler for API routes
 app.use('/api/v1/*', (req, res, next) => { 
     next(new ApiError(httpStatus.NOT_FOUND || 404, 'The requested API endpoint does not exist.'));
 });
 
+// Error handling
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5001;
