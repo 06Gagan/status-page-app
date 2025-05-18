@@ -77,8 +77,6 @@ status-page-app/
 ## Database
 
 - Uses PostgreSQL. Connect using the `pg` module.
-- **Never store SQL files in the repo.**
-- If you need to change the schema, use SQL queries in pgAdmin.
 
 ## API Overview
 
@@ -91,12 +89,10 @@ status-page-app/
 - Responsive and works across devices
 - State managed with React Context
 
-## Development Tips
+## Development approach 
 
 - Keep code clean and simple
 - Separate frontend and backend logic
-- Use meaningful names
-- Only comment when needed
 
 ## License
 
